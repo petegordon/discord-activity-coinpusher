@@ -19,7 +19,11 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayRoom"] }],
   // Also serve on <name>.<subdomain>.workers.dev, which works before the custom domain is set up.
   "workers_dev": true,
-  "routes": [{ "pattern": "coins.housetandem.com", "custom_domain": true }],
+  // coins is the main address; coinpusher (the first one) serves the same game.
+  "routes": [
+    { "pattern": "coins.housetandem.com", "custom_domain": true },
+    { "pattern": "coinpusher.housetandem.com", "custom_domain": true }
+  ],
   "vars": {
     // Public Discord application ID. The secret is set with: wrangler secret put DISCORD_CLIENT_SECRET
     "DISCORD_CLIENT_ID": ""

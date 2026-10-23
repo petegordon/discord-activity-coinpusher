@@ -38,17 +38,20 @@ All in `src/game/rules.ts`.
   - Shakes from different players within **300 ms** combine into one **strong** shake (3×).
   - A lone shake, with others at the table, is a **gentle** nudge (1×).
   - Playing alone, every shake is strong, since there's nobody to sync with.
-  - A shake is mostly a jiggle: everything hops and wobbles. Each shake also jolts in a random direction: forward 60% of the time, sideways 25%, backward 15%. Prizes feel it about 8× more than coins, so shaking rocks the tower without sweeping the coins off (changed 2026-10-22 after Pete found shakes cleared the shelf).
+  - A shake is mostly a jiggle: everything hops and wobbles. Each shake also jolts in a random direction: forward 70% of the time, sideways 20%, backward 10% (Pete’s split, 2026-10-23). Prizes feel it about 8× more than coins, so shaking rocks the tower without sweeping the coins off (changed 2026-10-22 after Pete found shakes cleared the shelf).
 - **Prize tower.** Four stacked gift boxes worth **10, 20, 30 and 50** points, bottom to top, set slightly off-centre so they teeter.
   - A prize that falls into the tray scores for the team. A prize that falls into a gutter is lost.
   - A new tower arrives 1.5 s after the last prize leaves the shelf.
 - **Gutters.** Coins that fall off the front within the centre 70% land in the win tray. Outside that, the side gutters keep them, as in the arcade. Without gutters, every coin would eventually come back and the game would never end.
 - **Drops.** At most one drop per player every **350 ms**.
 - **Starting pile.** 190 coins are shuffled into place by the pusher before play starts.
+- **Coin stacks** (Pete’s idea, 2026-10-23). Short stacks of 3–4 coins sit on the lip of the shelf over the tray, clear of the tower: 5 on a fresh shelf, 3 more with each new tower. The pile shoves them in early, so coins start coming back sooner. Stacks of 5 or more topple on their own as the pile creeps, so they stay short.
 
 Measured in the simulation (`test/sim.test.ts` and a 30 s diagnostic):
 - Once the shelf is full, roughly as many coins fall off as are dropped. About a third of them go into the gutters.
 - **One strong shake knocks off about 0.7 coins (vs 0.3 in the same 2 s without it; it was 3.7 before the change).** With two players dropping and a synchronized shake every 4 s, the first prize falls at 8–60 s, about 5 prizes a minute. Without shakes, prizes rarely fall.
+
+- **Coins back, two players dropping every 0.7 s with a strong shake every 4 s (8 seeds):** 14.8 per game by 20 s and 62% of dropped coins over a minute, up from 9.9 and 45% without stacks. Stacks set further back held the front row down and made the start slower.
 
 So shaking is what wins prizes, and the tilt meter stops it being free.
 

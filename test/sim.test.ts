@@ -28,6 +28,19 @@ describe("DozerSim", () => {
     }
   });
 
+  it("starts with stacks of coins standing near the front edge", () => {
+    for (const seed of [42, 7, 9]) {
+      sim.reset(seed);
+      const coins = sim.all().filter((b) => b.kind === KIND_COIN);
+      // A coin sitting squarely on another one, as in a stack (the loose pile is never this neat).
+      const stacked = coins.filter(
+        (a) => a.p[2] > 0.12 && coins.some((b) => b !== a && Math.hypot(a.p[0] - b.p[0], a.p[2] - b.p[2]) < 0.004 && Math.abs(a.p[1] - b.p[1] - 0.0085) < 0.002),
+      );
+      console.log(`seed ${seed}: ${stacked.length} coins sitting in stacks near the edge`);
+      expect(stacked.length).toBeGreaterThanOrEqual(6);
+    }
+  });
+
   it("is the same pile for the same seed", async () => {
     const other = new DozerSim(await loadRapier());
     other.reset(42);

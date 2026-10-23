@@ -31,6 +31,12 @@ const PRIZE_DENSITY = 350;
 const OUT_Y = -0.05;
 /** A new tower arrives this long after the last prize leaves. */
 const TOWER_DELAY_S = 1.5;
+/** Coin stacks on a fresh shelf, and with each new prize tower. */
+const START_STACKS = 5;
+const STACKS_PER_TOWER = 3;
+/** Stack heights. Taller stacks topple on their own as the pile creeps. */
+const STACK_MIN = 3;
+const STACK_MAX = 4;
 /** Ignore coins beyond this many on the shelf (a safety cap, not a rule). */
 export const MAX_COINS = 280;
 
@@ -171,7 +177,7 @@ export class DozerSim {
   }
 
   /** A teetering stack of prizes, dropped onto the coins in the front half of the shelf. */
-  private addTower(dropFrom = 0.05) {
+  private addTower(dropFrom = 0.05, stacks = STACKS_PER_TOWER) {
     const x = (this.rand() - 0.5) * 0.16;
     const z = 0.1 + this.rand() * 0.04;
     let y = dropFrom;
@@ -183,6 +189,50 @@ export class DozerSim {
       y += hy + 0.001;
     });
     this.towerArrived = true;
+    this.addStacks(stacks, { x, z });
+  }
+
+  /**
+   * Short stacks of coins sitting on the pile near the front edge, clear of the
+   * tower: a push or a shake spills a whole stack into the tray.
+   */
+  private addStacks(n: number, tower: { x: number; z: number }) {
+    const [bx, , bz] = PRIZE_SIZES[0];
+    const placed: { x: number; z: number }[] = [];
+    for (let tries = 0; placed.length < n && tries < 60; tries++) {
+      // Over the tray, clear of the tower's bottom box and of the other stacks.
+      const x = (this.rand() - 0.5) * 2 * (TABLE.trayHalfWidth - COIN.radius - 0.005);
+      const z = 0.2 + this.rand() * 0.028;
+      if (Math.abs(x - tower.x) < bx + COIN.radius + 0.01 && Math.abs(z - tower.z) < bz + COIN.radius + 0.01) continue;
+      if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < COIN.radius * 2.6)) continue;
+      placed.push({ x, z });
+      // Set down on whatever coins are under it, so it doesn't fall from a height.
+      this.addStack(x, this.surfaceAt(x, z) + 0.0005, z, this.stackHeight());
+    }
+  }
+
+  /** A neat column of `height` coins whose bottom face is at `y`. */
+  private addStack(x: number, y: number, z: number, height: number) {
+    for (let c = 0; c < height; c++) {
+      y += COIN.thickness / 2;
+      this.addCoin({ x: x + (this.rand() - 0.5) * 0.0015, y, z: z + (this.rand() - 0.5) * 0.0015 }, quatFromEuler(0, this.rand() * 6, 0));
+      y += COIN.thickness / 2 + 0.0005;
+    }
+  }
+
+  private stackHeight() {
+    return STACK_MIN + Math.floor(this.rand() * (STACK_MAX - STACK_MIN + 1));
+  }
+
+  /** The top of the coin pile directly under (x, z). */
+  private surfaceAt(x: number, z: number) {
+    let top = 0;
+    for (const { body, kind } of this.bodies.values()) {
+      if (kind !== KIND_COIN) continue;
+      const p = body.translation();
+      if (Math.hypot(p.x - x, p.z - z) < COIN.radius) top = Math.max(top, p.y + COIN.thickness / 2);
+    }
+    return top;
   }
 
   /** A fresh shelf: a pile of coins shuffled into place by the pusher, and a prize tower. */
@@ -198,6 +248,7 @@ export class DozerSim {
     for (let z = TABLE.pusherMaxZ + COIN.radius + 0.004; z < TABLE.frontZ - COIN.radius; z += spacing) {
       for (let c = 0; c < cols; c++) cells.push({ x: -TABLE.halfWidth + 0.005 + spacing / 2 + c * spacing, z });
     }
+    // Stacks stand on the felt near the front, over the tray, with the pile packed around them.
     for (let i = 0; i < START_PILE; i++) {
       const cell = cells[i % cells.length];
       const layer = Math.floor(i / cells.length);
@@ -210,7 +261,7 @@ export class DozerSim {
     // Let it settle with the pusher running; anything that falls off now doesn't count.
     this.towerIn = Infinity;
     for (let i = 0; i < 3 / STEP_S; i++) this.fixedStep();
-    this.addTower(0.03);
+    this.addTower(0.03, START_STACKS);
     for (let i = 0; i < 1 / STEP_S; i++) this.fixedStep();
     this.outs = [];
     this.towerIn = null;
@@ -261,8 +312,8 @@ export class DozerSim {
    */
   shake(strength: number) {
     const r = this.rand();
-    // Forward 60% of the time, sideways 25%, backward 15%.
-    const angle = r < 0.6 ? (this.rand() - 0.5) * 1.2 : r < 0.85 ? (this.rand() < 0.5 ? -1 : 1) * (1.2 + this.rand() * 0.6) : Math.PI + (this.rand() - 0.5) * 1.2;
+    // Forward 70% of the time, sideways 20%, backward 10%.
+    const angle = r < 0.7 ? (this.rand() - 0.5) * 1.2 : r < 0.9 ? (this.rand() < 0.5 ? -1 : 1) * (1.2 + this.rand() * 0.6) : Math.PI + (this.rand() - 0.5) * 1.2;
     const dx = Math.sin(angle);
     const dz = Math.cos(angle);
     for (const { body, kind } of this.bodies.values()) {

@@ -1,6 +1,6 @@
 # Carnival Dozer: Plan & Specification
 
-A multiplayer **carnival coin pusher** with a 3D cabinet. It runs **as a Discord Activity** and **as a standalone web app** at **https://coinpusher.housetandem.com**. Everyone plays together on one shelf:
+A multiplayer **carnival coin pusher** with a 3D cabinet. It runs **as a Discord Activity** and **as a standalone web app** at **https://coins.housetandem.com**. Everyone plays together on one shelf:
 - **Hold the pad and roll your wrist** to aim your chute.
 - **Flick** to drop a coin. The twist as you flick spins the coin.
 - **Let go and jerk the phone up** to shake the shelf.
@@ -108,7 +108,7 @@ The host-authoritative star, host migration, the PeerJS and relay transports, Di
 | `VITE_DISCORD_CLIENT_ID` | `.env.production` | **Empty until the Discord app is created** |
 | `DISCORD_CLIENT_ID` | `wrangler.jsonc` vars | Same |
 | `DISCORD_CLIENT_SECRET` | `wrangler secret put` | From the Developer Portal |
-| `VITE_PUBLIC_ORIGIN` | `.env.production` | `https://coinpusher.housetandem.com` (where phones open the remote from inside Discord) |
+| `VITE_PUBLIC_ORIGIN` | `.env.production` | `https://coins.housetandem.com` (where phones open the remote from inside Discord) |
 
 ## 7. Ideas not in v1 (need a design decision first)
 - Different prizes, bonus pockets or power-up coins; levels or a prize "collection".

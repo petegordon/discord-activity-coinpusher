@@ -209,7 +209,6 @@ async function boot() {
     for (const e of f.events) {
       switch (e.k) {
         case "drop":
-          scene.dropped(e.by);
           if (e.by !== self.id) audio.clink(0.3);
           break;
         case "won":

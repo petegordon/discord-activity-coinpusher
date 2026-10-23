@@ -8,7 +8,7 @@ Shake **together** to topple the prize tower, but watch the **TILT** alarm. Play
 
 | | |
 |---|---|
-| **Play in a browser** | https://coinpusher.housetandem.com |
+| **Play in a browser** | https://coins.housetandem.com |
 | **In Discord** | Coming once the Discord application is set up (see below) |
 
 Built with:
@@ -72,7 +72,7 @@ Screenshots go to `scripts/out/`. Add these to a table URL:
 
 ## Deploying to Cloudflare
 
-The Worker serves the static build, `/api/*` and the relay on the custom domain **coinpusher.housetandem.com**. Wrangler creates the DNS record on deploy, since the `housetandem.com` zone is on the same Cloudflare account.
+The Worker serves the static build, `/api/*` and the relay on the custom domain **coins.housetandem.com**. Wrangler creates the DNS record on deploy, since the `housetandem.com` zone is on the same Cloudflare account.
 
 ```bash
 npm run deploy
@@ -84,10 +84,10 @@ npx wrangler secret put DISCORD_CLIENT_SECRET   # once the Discord app exists
 The same steps as the dice app ([its README](https://github.com/petegordon/discord-activity-dice#discord-activity-setup)), with this app's domain:
 
 1. Create an application at https://discord.com/developers/applications and enable **Activities**.
-2. **URL Mappings:** `/` → `coinpusher.housetandem.com` (and `/peerjs` → `0.peerjs.com` only if forcing `t=peerjs`).
+2. **URL Mappings:** `/` → `coins.housetandem.com` (and `/peerjs` → `0.peerjs.com` only if forcing `t=peerjs`).
 3. **OAuth2 → Redirects:** exactly one, e.g. `https://127.0.0.1`.
 4. Put the application ID in `wrangler.jsonc` (`vars.DISCORD_CLIENT_ID`) and `.env.production` (`VITE_DISCORD_CLIENT_ID`). Set the secret with `npx wrangler secret put DISCORD_CLIENT_SECRET`, then run `npm run deploy`.
-5. **Terms of Service URL:** https://coinpusher.housetandem.com/terms · **Privacy Policy URL:** https://coinpusher.housetandem.com/privacy
+5. **Terms of Service URL:** https://coins.housetandem.com/terms · **Privacy Policy URL:** https://coins.housetandem.com/privacy
 6. **Installation:** Guild Install with `applications.commands`. Under **Supported Platforms**, tick iOS and Android.
 
 ## Project layout

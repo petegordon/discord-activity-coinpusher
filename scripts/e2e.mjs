@@ -89,7 +89,8 @@ const seen = players[0].page.evaluate(
       });
     }),
 );
-await Promise.all(players.map((p) => p.page.click("#shake-btn")));
+// Press SHAKE on every page at once (Playwright clicks can land >300 ms apart).
+await Promise.all(players.map((p) => p.page.evaluate(() => document.getElementById("shake-btn").click())));
 const shake = await within(seen, 10_000, "shake event");
 console.log("shake:", JSON.stringify(shake));
 if (count > 1 && shake.by.length !== count) throw new Error("shakes didn't combine");

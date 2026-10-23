@@ -8,7 +8,7 @@ import { inDiscord } from "../platform/env";
  */
 export function publicOrigin(): string {
   const configured = import.meta.env.VITE_PUBLIC_ORIGIN as string | undefined;
-  if (inDiscord) return configured || "https://coinpusher.housetandem.com";
+  if (inDiscord) return configured || "https://coins.housetandem.com";
   return location.origin;
 }
 

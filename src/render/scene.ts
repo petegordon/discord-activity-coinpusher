@@ -11,7 +11,15 @@ const MAX_COINS = 320;
 const W = TABLE.halfWidth;
 
 type Sample = { ms: number; p: THREE.Vector3; q: THREE.Quaternion };
-type Track = { kind: number; samples: Sample[]; mesh?: THREE.Object3D };
+type Track = {
+  kind: number;
+  samples: Sample[];
+  mesh?: THREE.Object3D;
+  /** Each coin's own shade of gold, so the pile isn't one flat colour. */
+  shade?: THREE.Color;
+  /** A freshly dropped coin: who dropped it (their colour) and when it appeared. */
+  glow?: { color: THREE.Color; born: number };
+};
 
 const PRIZE_LOOKS = [
   { color: "#e63946", ribbon: "#ffd166", label: "10" },
@@ -98,29 +106,68 @@ function marqueeTexture(): THREE.CanvasTexture {
   return t;
 }
 
+/**
+ * The playfield, drawn once across the whole shelf (back at the top of the
+ * canvas, front edge at the bottom): carnival-blue felt with gold diamonds,
+ * brighter in the middle, and a lit band along the front edge where coins win.
+ */
 function floorTexture(): THREE.CanvasTexture {
   const c = document.createElement("canvas");
   c.width = 512;
   c.height = 512;
   const g = c.getContext("2d")!;
-  g.fillStyle = "#16324f";
+  const felt = g.createRadialGradient(256, 300, 40, 256, 300, 420);
+  felt.addColorStop(0, "#3a8ee8");
+  felt.addColorStop(0.6, "#2163b8");
+  felt.addColorStop(1, "#163f80");
+  g.fillStyle = felt;
   g.fillRect(0, 0, 512, 512);
-  g.strokeStyle = "rgba(255,209,102,0.16)";
-  g.lineWidth = 3;
-  for (let i = 0; i < 512; i += 64) {
-    g.beginPath();
-    g.moveTo(i, 0);
-    g.lineTo(i, 512);
-    g.moveTo(0, i);
-    g.lineTo(512, i);
-    g.stroke();
+  // Gold diamonds in rows.
+  g.fillStyle = "rgba(255, 214, 110, 0.22)";
+  for (let y = 24; y < 470; y += 48) {
+    for (let x = (y / 48) % 2 ? 24 : 48; x < 512; x += 48) {
+      g.beginPath();
+      g.moveTo(x, y - 9);
+      g.lineTo(x + 7, y);
+      g.lineTo(x, y + 9);
+      g.lineTo(x - 7, y);
+      g.fill();
+    }
+  }
+  // The win zone along the front edge: gold in the tray's width, dark over the gutters.
+  const trayPx = (TABLE.trayHalfWidth / TABLE.halfWidth) * 256;
+  const band = g.createLinearGradient(0, 470, 0, 512);
+  band.addColorStop(0, "rgba(255, 209, 102, 0)");
+  band.addColorStop(1, "rgba(255, 209, 102, 0.75)");
+  g.fillStyle = band;
+  g.fillRect(256 - trayPx, 462, trayPx * 2, 50);
+  g.fillStyle = "rgba(40, 6, 14, 0.75)";
+  g.fillRect(0, 488, 256 - trayPx, 24);
+  g.fillRect(256 + trayPx, 488, 256 - trayPx, 24);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+/** Red and cream circus stripes for the pusher's top. */
+function stripeTexture(): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 256;
+  c.height = 64;
+  const g = c.getContext("2d")!;
+  for (let i = 0; i < 16; i++) {
+    g.fillStyle = i % 2 ? "#fff1d6" : "#d7263d";
+    g.fillRect(i * 16, 0, 16, 64);
   }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(3, 4);
   return t;
 }
+
+/** A coin just dropped glows in its dropper's colour for this long (ms). */
+const GLOW_MS = 1600;
+const GOLD = new THREE.Color("#ffc94a");
 
 export type Burst = "coin" | "prize" | "lost";
 
@@ -141,7 +188,12 @@ export class DozerScene {
   /** host clock ms − local performance.now(), the largest seen (least delayed). */
   private clockOffset: number | null = null;
   private lastFrameMs = 0;
-  private chutes = new Map<string, { group: THREE.Group; aim: number; target: number; flash: number }>();
+  private chutes = new Map<string, { group: THREE.Group; aim: number; target: number; flash: number; color: THREE.Color; mat: THREE.MeshStandardMaterial }>();
+  /** Colours of drops announced but whose coin hasn't arrived in a frame yet. */
+  private pendingGlows: { color: THREE.Color; at: number }[] = [];
+  /** A small light that rides along with the newest dropped coin. */
+  private dropLight = new THREE.PointLight("#ffffff", 0, 0.35, 1.5);
+  private tmpC = new THREE.Color();
   private bulbs: THREE.Mesh[] = [];
   private bulbMat: THREE.MeshStandardMaterial[] = [];
   private shakeT = 0;
@@ -179,8 +231,12 @@ export class DozerScene {
     this.buildLights();
 
     const coinGeo = new THREE.CylinderGeometry(COIN.radius, COIN.radius, COIN.thickness, 28);
-    const coinMat = new THREE.MeshStandardMaterial({ color: "#e8b84a", metalness: 0.9, roughness: 0.38 });
+    // White here; each coin's gold (and a fresh drop's glow) comes from its instance colour.
+    const coinMat = new THREE.MeshStandardMaterial({ color: "#ffffff", metalness: 0.85, roughness: 0.36, envMapIntensity: 0.8 });
     this.coins = new THREE.InstancedMesh(coinGeo, coinMat, MAX_COINS);
+    for (let i = 0; i < MAX_COINS; i++) this.coins.setColorAt(i, GOLD);
+    this.coins.instanceColor!.setUsage(THREE.DynamicDrawUsage);
+    this.cabinet.add(this.dropLight);
     this.coins.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.coins.castShadow = true;
     this.coins.receiveShadow = true;
@@ -204,12 +260,14 @@ export class DozerScene {
 
   private buildCabinet(): THREE.Mesh {
     const c = this.cabinet;
-    const metal = new THREE.MeshStandardMaterial({ color: "#c9ced6", metalness: 1, roughness: 0.25 });
-    const gold = new THREE.MeshStandardMaterial({ color: "#d9a43a", metalness: 1, roughness: 0.3 });
-    const red = new THREE.MeshStandardMaterial({ color: "#8e1424", roughness: 0.5, metalness: 0.1 });
+    const gold = new THREE.MeshStandardMaterial({ color: "#e8b04a", metalness: 1, roughness: 0.28 });
+    const red = new THREE.MeshStandardMaterial({ color: "#9e1430", roughness: 0.5, metalness: 0.1 });
+    const stripes = new THREE.MeshStandardMaterial({ map: stripeTexture(), roughness: 0.4, metalness: 0.1 });
 
-    // Playfield.
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(W * 2, 0.02, TABLE.frontZ - TABLE.backZ + 0.02), new THREE.MeshStandardMaterial({ map: floorTexture(), roughness: 0.35, metalness: 0.2 }));
+    // Playfield: one texture over the top face, front edge at the bottom of it.
+    const feltMat = new THREE.MeshStandardMaterial({ map: floorTexture(), roughness: 0.55, metalness: 0.05 });
+    const edgeMat = new THREE.MeshStandardMaterial({ color: "#163f80", roughness: 0.6 });
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(W * 2, 0.02, TABLE.frontZ - TABLE.backZ + 0.02), [edgeMat, edgeMat, feltMat, edgeMat, edgeMat, edgeMat]);
     floor.position.set(0, -0.01, (TABLE.frontZ + TABLE.backZ) / 2);
     floor.receiveShadow = true;
     c.add(floor);
@@ -253,7 +311,8 @@ export class DozerScene {
     }
 
     // Back wall with the marquee.
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(W * 2 + 0.06, 0.34, 0.03), new THREE.MeshStandardMaterial({ map: marqueeTexture(), roughness: 0.6, emissive: "#ffffff", emissiveIntensity: 0.12, emissiveMap: marqueeTexture() }));
+    const marquee = marqueeTexture();
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(W * 2 + 0.06, 0.34, 0.03), new THREE.MeshStandardMaterial({ map: marquee, roughness: 0.6, emissive: "#ffffff", emissiveIntensity: 0.22, emissiveMap: marquee }));
     wall.position.set(0, TABLE.pusherTop + 0.006 + 0.17, TABLE.backZ - 0.015);
     c.add(wall);
     // Chase lights along the marquee's top.
@@ -270,12 +329,12 @@ export class DozerScene {
     trim.position.set(0, TABLE.pusherTop + 0.012, TABLE.backZ - 0.012);
     c.add(trim);
 
-    // The pusher: a chrome slab with a striped face.
-    const pusher = new THREE.Mesh(new THREE.BoxGeometry(W * 2 - 0.004, TABLE.pusherTop, 0.4), metal);
+    // The pusher: circus stripes on top, a gold face with a red band.
+    const pusher = new THREE.Mesh(new THREE.BoxGeometry(W * 2 - 0.004, TABLE.pusherTop, 0.4), [red, red, stripes, red, gold, red]);
     pusher.castShadow = true;
     pusher.receiveShadow = true;
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(W * 2 - 0.004, TABLE.pusherTop * 0.35, 0.002), red);
-    stripe.position.set(0, 0, 0.2);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(W * 2 - 0.004, TABLE.pusherTop * 0.3, 0.002), red);
+    stripe.position.set(0, 0, 0.2005);
     pusher.add(stripe);
     pusher.position.set(0, TABLE.pusherTop / 2, TABLE.pusherMinZ - 0.2);
     c.add(pusher);
@@ -283,23 +342,31 @@ export class DozerScene {
   }
 
   private buildLights() {
-    this.scene.add(new THREE.HemisphereLight("#ffe8cc", "#20101a", 0.6));
-    const key = new THREE.DirectionalLight("#fff4e0", 2.2);
-    key.position.set(0.25, 0.9, 0.5);
-    key.castShadow = true;
-    key.shadow.mapSize.set(1024, 1024);
-    const sc = key.shadow.camera;
-    sc.left = -0.4;
-    sc.right = 0.4;
-    sc.top = 0.4;
-    sc.bottom = -0.4;
-    sc.near = 0.1;
-    sc.far = 2;
-    key.shadow.bias = -0.0005;
-    this.scene.add(key);
-    const warm = new THREE.PointLight("#ff9a3c", 0.6, 1.5);
-    warm.position.set(0, 0.3, TABLE.backZ + 0.05);
+    this.scene.add(new THREE.HemisphereLight("#fff0dc", "#2a1030", 0.45));
+    // A showcase spotlight over the shelf, from above the player's head: bright pool on the coins, soft shadows.
+    const spot = new THREE.SpotLight("#fff6e6", 3.2, 2.2, 0.62, 0.55, 1.2);
+    spot.position.set(0.06, 0.95, 0.42);
+    spot.target.position.set(0, 0, 0.02);
+    spot.castShadow = true;
+    spot.shadow.mapSize.set(1024, 1024);
+    spot.shadow.bias = -0.0004;
+    spot.shadow.camera.near = 0.3;
+    spot.shadow.camera.far = 2;
+    this.scene.add(spot, spot.target);
+    // Warm fill from the front, low, to light the faces of the coins at the edge.
+    const fill = new THREE.DirectionalLight("#ffb35c", 0.5);
+    fill.position.set(-0.2, 0.25, 1);
+    this.scene.add(fill);
+    // The marquee's glow spilling onto the back of the shelf.
+    const warm = new THREE.PointLight("#ff8a3c", 0.6, 0.9, 1.5);
+    warm.position.set(0, 0.22, TABLE.backZ + 0.06);
     this.scene.add(warm);
+    // Carnival colour on the sides: magenta left, cyan right.
+    const left = new THREE.PointLight("#ff4fb4", 0.7, 0.8, 1.5);
+    left.position.set(-W - 0.02, 0.16, 0.05);
+    const right = new THREE.PointLight("#3fd8ff", 0.7, 0.8, 1.5);
+    right.position.set(W + 0.02, 0.16, 0.05);
+    this.scene.add(left, right);
   }
 
   /** Each player's chute, in join order, in their colour. */
@@ -315,27 +382,38 @@ export class DozerScene {
       let c = this.chutes.get(p.id);
       if (!c) {
         const group = new THREE.Group();
-        const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.35, metalness: 0.3, emissive: p.color, emissiveIntensity: 0.15 });
-        // A short open trough tipped toward the shelf.
+        const color = new THREE.Color(p.color);
+        const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.2, emissive: color, emissiveIntensity: 0.3 });
+        const rim = new THREE.MeshStandardMaterial({ color: "#ffe3a0", metalness: 1, roughness: 0.25 });
+        // An open trough tipped toward the shelf, with gold rails.
         const trough = new THREE.Group();
-        const base = new THREE.Mesh(new THREE.BoxGeometry(0.056, 0.004, 0.07), mat);
+        const base = new THREE.Mesh(new THREE.BoxGeometry(0.064, 0.005, 0.085), mat);
         trough.add(base);
         for (const s of [-1, 1]) {
-          const side = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.02, 0.07), mat);
-          side.position.set(s * 0.028, 0.01, 0);
+          const side = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.024, 0.085), mat);
+          side.position.set(s * 0.032, 0.012, 0);
           trough.add(side);
+          const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.088, 8), rim);
+          rail.rotation.x = Math.PI / 2;
+          rail.position.set(s * 0.032, 0.025, 0);
+          trough.add(rail);
         }
         trough.rotation.x = 0.35;
-        trough.position.set(0, 0, 0.02);
+        trough.position.set(0, 0, 0.025);
         group.add(trough);
-        // The aim line: where the coin will head.
-        const line = new THREE.Mesh(new THREE.PlaneGeometry(0.006, 0.16), new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.35, depthWrite: false }));
+        // The aim line along the shelf, where the coin will head, ending in a ring where a medium flick lands.
+        const glowMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending });
+        const floorY = -TABLE.chuteY + TABLE.pusherTop + 0.003;
+        const line = new THREE.Mesh(new THREE.PlaneGeometry(0.008, 0.2), glowMat);
         line.rotation.x = -Math.PI / 2;
-        line.position.set(0, -TABLE.chuteY + TABLE.pusherTop + 0.002, 0.12);
-        line.name = "aim";
+        line.position.set(0, floorY, 0.11);
         group.add(line);
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.016, 0.024, 28), glowMat);
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(0, floorY, 0.21);
+        group.add(ring);
         this.cabinet.add(group);
-        c = { group, aim: 0, target: 0, flash: 0 };
+        c = { group, aim: 0, target: 0, flash: 0, color, mat };
         this.chutes.set(p.id, c);
       }
       c.group.position.set(chuteX(i, players.length), TABLE.chuteY, TABLE.backZ + 0.01);
@@ -350,7 +428,9 @@ export class DozerScene {
   /** A coin just left `id`'s chute. */
   dropped(id: string) {
     const c = this.chutes.get(id);
-    if (c) c.flash = 1;
+    if (!c) return;
+    c.flash = 1;
+    this.pendingGlows.push({ color: c.color, at: performance.now() });
   }
 
   /** Jolt the cabinet. */
@@ -394,12 +474,20 @@ export class DozerScene {
       for (const id of [...this.tracks.keys()]) if (!seen.has(id)) this.removeTrack(id);
     }
     for (const id of f.gone) this.removeTrack(id);
+    // Drops first: the dropped coin arrives in this same frame.
+    for (const e of f.events) if (e.k === "drop") this.dropped(e.by);
     for (const b of delta) {
       let t = this.tracks.get(b.id);
       if (!t || t.kind !== b.kind) {
         if (t) this.removeTrack(b.id);
         t = { kind: b.kind, samples: [] };
-        if (b.kind !== KIND_COIN) {
+        if (b.kind === KIND_COIN) {
+          t.shade = GOLD.clone().offsetHSL((Math.random() - 0.5) * 0.02, 0, (Math.random() - 0.5) * 0.12);
+          // A coin that appears just after a drop was announced is that drop's coin.
+          while (this.pendingGlows.length && local - this.pendingGlows[0].at > 1500) this.pendingGlows.shift();
+          const glow = this.pendingGlows.shift();
+          if (glow) t.glow = { color: glow.color, born: local };
+        } else {
           const tier = Math.max(0, Math.min(PRIZE_SIZES.length - 1, b.kind - KIND_PRIZE));
           const mesh = new THREE.Mesh(this.prizeGeoms[tier], this.prizeMats[tier]);
           mesh.castShadow = true;
@@ -486,12 +574,25 @@ export class DozerScene {
     const ms = (this.clockOffset ?? 0) + now - INTERP_MS;
 
     let n = 0;
+    let newest: { born: number; color: THREE.Color; p: THREE.Vector3; k: number } | null = null;
     for (const t of this.tracks.values()) {
       if (!this.poseAt(t, ms)) continue;
       if (t.kind === KIND_COIN) {
         if (n >= MAX_COINS) continue;
         this.tmp.compose(this.tmpP, this.tmpQ, this.one);
-        this.coins.setMatrixAt(n++, this.tmp);
+        this.coins.setMatrixAt(n, this.tmp);
+        // A fresh drop glows in its dropper's colour, fading back to gold as it settles.
+        const c = this.tmpC.copy(t.shade ?? GOLD);
+        if (t.glow) {
+          const k = 1 - (now - t.glow.born) / GLOW_MS;
+          if (k <= 0) t.glow = undefined;
+          else {
+            c.lerp(t.glow.color, 0.55 * k).multiplyScalar(1 + 1.4 * k);
+            if (!newest || t.glow.born > newest.born) newest = { born: t.glow.born, color: t.glow.color, p: this.tmpP.clone(), k };
+          }
+        }
+        this.coins.setColorAt(n, c);
+        n++;
       } else if (t.mesh) {
         t.mesh.position.copy(this.tmpP);
         t.mesh.quaternion.copy(this.tmpQ);
@@ -499,6 +600,13 @@ export class DozerScene {
     }
     this.coins.count = n;
     this.coins.instanceMatrix.needsUpdate = true;
+    if (this.coins.instanceColor) this.coins.instanceColor.needsUpdate = true;
+    // The light rides just above the newest dropped coin, so you can follow it down the shelf.
+    if (newest) {
+      this.dropLight.color.copy(newest.color);
+      this.dropLight.position.copy(newest.p).add(this.tmpP.set(0, 0.03, 0));
+      this.dropLight.intensity = 1.6 * newest.k;
+    } else this.dropLight.intensity = 0;
 
     const ps = this.pusherSamples;
     if (ps.length) {
@@ -519,6 +627,7 @@ export class DozerScene {
       c.group.rotation.y = c.aim;
       c.flash = Math.max(0, c.flash - dt * 3);
       c.group.scale.setScalar(1 + c.flash * 0.25);
+      c.mat.emissiveIntensity = 0.3 + c.flash * 1.4;
     }
 
     // Chase lights; red and flashing while tilted.

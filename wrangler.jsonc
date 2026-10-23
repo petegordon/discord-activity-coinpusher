@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "discord-activity-coinpusher",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist",
+    // The Worker passes anything that isn't /api/* on to the static files (env.ASSETS in worker/src/index.ts).
+    "binding": "ASSETS",
+    // A missing file is a 404, never the game page: during a deploy, a script that hasn't arrived
+    // yet must fail as a script so public/boot-guard.js can reload the page.
+    "not_found_handling": "none",
+    // /screenshots/ runs the worker so the demo reel videos can answer Range requests (worker/src/ranges.ts).
+    "run_worker_first": ["/api/*", "/screenshots/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "RELAY", "class_name": "RelayRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayRoom"] }],
+  // Also serve on <name>.<subdomain>.workers.dev, which works before the custom domain is set up.
+  "workers_dev": true,
+  "routes": [{ "pattern": "coinpusher.housetandem.com", "custom_domain": true }],
+  "vars": {
+    // Public Discord application ID. The secret is set with: wrangler secret put DISCORD_CLIENT_SECRET
+    "DISCORD_CLIENT_ID": ""
+  }
+}

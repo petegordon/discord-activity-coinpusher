@@ -1,0 +1,456 @@
+:root {
+  --bg: #140a12;
+  --panel: rgba(255, 255, 255, 0.06);
+  --panel-solid: #26101c;
+  --line: rgba(255, 255, 255, 0.12);
+  --text: #f4efe4;
+  --muted: #d1b8a8;
+  --gold: #ffd166;
+  --hit: #7ee081;
+  --miss: #ff8a80;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.remote {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--safe-top) + 12px) 16px calc(var(--safe-bottom) + 12px);
+  gap: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+
+.r-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.r-me {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 700;
+}
+
+.r-me .avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--pc, var(--gold));
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+}
+
+.r-me .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.r-top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.r-icon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.r-learn {
+  margin: 0;
+}
+
+.r-learn a {
+  color: var(--gold);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.r-conn {
+  flex: none;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #3a2a10;
+  color: #ffe2a8;
+}
+
+.r-conn.ok {
+  background: rgba(126, 224, 129, 0.15);
+  color: var(--hit);
+}
+
+.r-main {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.r-banner {
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  min-height: 1.4em;
+}
+
+.r-banner b {
+  color: var(--text);
+}
+
+.r-pad {
+  flex: 1;
+  border-radius: 28px;
+  border: 2px dashed rgba(255, 255, 255, 0.28);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+  touch-action: none;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.r-pad .zone-title {
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+}
+
+.r-pad .zone-sub {
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.r-pad.mine {
+  border-style: solid;
+  border-color: var(--pc, var(--gold));
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--pc, var(--gold)) 25%, transparent);
+  cursor: grab;
+}
+
+/* A gauge whose needle points where your chute is aimed. */
+.r-gauge {
+  position: relative;
+  width: 180px;
+  height: 92px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  opacity: 0.4;
+}
+
+.r-gauge::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: conic-gradient(from -30deg, rgba(255, 209, 102, 0.55) 0 60deg, transparent 60deg);
+  border: 4px solid #7a0e1c;
+  box-sizing: border-box;
+  transform: rotate(0deg);
+}
+
+.r-needle {
+  position: absolute;
+  left: 87px;
+  top: 8px;
+  width: 6px;
+  height: 84px;
+  border-radius: 3px;
+  background: var(--pc, var(--gold));
+  transform-origin: 50% 100%;
+  transition: transform 0.08s linear;
+}
+
+.r-pad.mine .r-gauge {
+  opacity: 1;
+}
+
+.r-pad.holding {
+  background: color-mix(in srgb, var(--pc, var(--gold)) 30%, var(--panel-solid));
+  transform: scale(0.985);
+}
+
+.r-pad.waiting .zone-title {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+/* In the top part of the pad, clear of the pad's own text in the middle. */
+.r-callout {
+  position: absolute;
+  inset: 12% 0 auto;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.r-callout.show {
+  animation: pop 2.4s cubic-bezier(0.2, 1.4, 0.4, 1) forwards;
+}
+
+.r-callout .callout-main {
+  font-size: clamp(40px, 13vw, 72px);
+  font-weight: 900;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.7);
+}
+
+.r-callout .callout-sub {
+  font-size: 20px;
+  font-weight: 700;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+}
+
+.r-callout.hit .callout-main {
+  color: var(--gold);
+}
+
+.r-callout.hit .callout-sub {
+  color: var(--hit);
+}
+
+.r-callout.red .callout-main {
+  color: #ff5a5f;
+}
+
+.r-callout.green .callout-main {
+  color: #3ddc84;
+}
+
+.r-callout.miss .callout-sub {
+  color: var(--miss);
+}
+
+@keyframes pop {
+  0% { opacity: 0; transform: scale(0.6); }
+  12% { opacity: 1; transform: scale(1); }
+  80% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.04); }
+}
+
+.r-hint {
+  min-height: 1.3em;
+  text-align: center;
+  color: var(--gold);
+  font-size: 14px;
+}
+
+.r-scores {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.r-scores li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 2px solid transparent;
+  font-size: 14px;
+}
+
+.r-scores li.spinner {
+  border-color: var(--pc);
+}
+
+.r-scores .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--pc);
+}
+
+.r-scores b {
+  color: var(--gold);
+}
+
+.r-layer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(5, 10, 7, 0.85);
+}
+
+.r-card {
+  width: min(380px, 100%);
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.r-card h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.r-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.r-big {
+  font-size: 48px;
+}
+
+.r-small {
+  font-size: 13px;
+}
+
+button.primary {
+  border: 0;
+  border-radius: 14px;
+  padding: 14px 18px;
+  font-weight: 800;
+  font-size: 18px;
+  background: var(--gold);
+  color: #1d1606;
+  cursor: pointer;
+}
+
+button:focus-visible,
+.r-pad:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .r-pad.flick {
+    animation: none;
+  }
+}
+
+.r-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-weight: 900;
+}
+
+.r-coins {
+  font-size: 30px;
+  color: var(--gold);
+}
+
+.r-score {
+  font-size: 18px;
+}
+
+.r-tilt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 2px 6px;
+}
+
+.r-tilt .tilt-track {
+  flex: 1;
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.tilt-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #7ee081, #ffd166, #ff4757);
+  transition: width 0.12s linear;
+}
+
+@keyframes blink {
+  50% { opacity: 0.3; }
+}
+
+.coin-icon {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border-radius: 50%;
+  vertical-align: -0.1em;
+  background: radial-gradient(circle at 35% 30%, #fff3b0, #ffd166 45%, #c98a1c 100%);
+}
+
+.shake-btn {
+  border: 0;
+  border-radius: 22px;
+  background: linear-gradient(180deg, #00b4d8, #0077b6);
+  color: #fff;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  box-shadow: 0 4px 0 #03466b;
+}
+
+.shake-btn.wide {
+  width: 100%;
+  padding: 16px;
+  font-size: 18px;
+}

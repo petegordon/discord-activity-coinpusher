@@ -1,0 +1,241 @@
+import { DurableObject } from "cloudflare:workers";
+import { verifyPlayerKey } from "../../src/net/identityKey";
+import { CLIENT_BROADCASTS, THROTTLED } from "../../src/net/protocol";
+import { splitPeers, type Attachment } from "./peers";
+import { DISCORD_ROOM_RE, discordRoom, roomTicket, verifyRoomTicket } from "./roomTicket";
+import { RANGED_RE, withRanges } from "./ranges";
+
+export interface Env {
+  RELAY: DurableObjectNamespace<RelayRoom>;
+  ASSETS: Fetcher;
+  DISCORD_CLIENT_ID: string;
+  DISCORD_CLIENT_SECRET?: string;
+  /** Optional Cloudflare Realtime TURN key, for NAT traversal of the PeerJS transport. */
+  TURN_KEY_ID?: string;
+  TURN_KEY_API_TOKEN?: string;
+}
+
+const ROOM_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const MAX_MESSAGE_BYTES = 64 * 1024;
+/** Players plus their phone remotes. */
+const MAX_SOCKETS_PER_ROOM = 48;
+/** Clients ping every 5s; a socket silent for this long is treated as dead (half-open TCP). */
+const STALE_MS = 16_000;
+/** Aims are cosmetic; relay at most one per this interval per socket. */
+const AIM_MIN_INTERVAL_MS = 40;
+const STUN: RTCIceServer[] = [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }];
+
+type RTCIceServer = { urls: string | string[]; username?: string; credential?: string };
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+
+export default {
+  async fetch(req, env): Promise<Response> {
+    const url = new URL(req.url);
+
+    if (url.pathname === "/api/token" && req.method === "POST") return exchangeToken(req, env);
+    if (url.pathname === "/api/ice" && req.method === "GET") return iceServers(req, env);
+
+    const relay = url.pathname.match(/^\/api\/relay\/([^/]+)$/);
+    if (relay) {
+      let room = "";
+      try {
+        room = decodeURIComponent(relay[1]);
+      } catch {
+        // malformed escape; rejected below
+      }
+      const id = url.searchParams.get("id") ?? "";
+      if (!ROOM_RE.test(room) || !ID_RE.test(id)) return json({ error: "bad room or id" }, 400);
+      // The id must be derived from the caller's secret key, so nobody can join as (or kick) someone else.
+      if (!(await verifyPlayerKey(id, url.searchParams.get("key")))) return json({ error: "bad key" }, 403);
+      // Players in a Discord room need the ticket from /api/token. Remotes don't: the host ignores any remote nobody paired.
+      const role = url.searchParams.get("role") === "remote" ? "remote" : "player";
+      if (role === "player" && DISCORD_ROOM_RE.test(room)) {
+        const ok = !!env.DISCORD_CLIENT_SECRET && (await verifyRoomTicket(env.DISCORD_CLIENT_SECRET, room, id, url.searchParams.get("ticket")));
+        if (!ok) return json({ error: "bad ticket" }, 403);
+      }
+      if (req.headers.get("Upgrade")?.toLowerCase() !== "websocket") return json({ error: "expected websocket" }, 426);
+      return env.RELAY.get(env.RELAY.idFromName(room)).fetch(req);
+    }
+
+    if (url.pathname.startsWith("/api/")) return json({ error: "not found" }, 404);
+    if (RANGED_RE.test(url.pathname) && (req.method === "GET" || req.method === "HEAD")) return withRanges(req, env.ASSETS);
+    return env.ASSETS.fetch(req);
+  },
+} satisfies ExportedHandler<Env>;
+
+/** Discord Embedded App SDK: swap the authorize() code for an access token. */
+async function exchangeToken(req: Request, env: Env): Promise<Response> {
+  if (!env.DISCORD_CLIENT_ID || !env.DISCORD_CLIENT_SECRET) return json({ error: "Discord is not configured" }, 503);
+  let body: { code?: unknown; instanceId?: unknown; playerId?: unknown };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return json({ error: "invalid body" }, 400);
+  }
+  const { code, instanceId, playerId } = body;
+  if (typeof code !== "string" || code.length > 512) return json({ error: "missing code" }, 400);
+
+  const res = await fetch("https://discord.com/api/oauth2/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: env.DISCORD_CLIENT_ID,
+      client_secret: env.DISCORD_CLIENT_SECRET,
+      grant_type: "authorization_code",
+      code,
+    }),
+  });
+  if (!res.ok) {
+    // Discord's OAuth error code (e.g. invalid_grant, invalid_client) isn't sensitive and makes setup problems diagnosable.
+    const detail = ((await res.json().catch(() => ({}))) as { error?: unknown }).error;
+    return json({ error: "token exchange failed", discord: typeof detail === "string" ? detail : res.status }, 502);
+  }
+  const { access_token } = (await res.json()) as { access_token?: string };
+  if (!access_token) return json({ error: "token exchange failed" }, 502);
+  // Older clients don't send these and keep using the raw instance id as their room.
+  if (typeof instanceId !== "string" || instanceId.length > 256 || typeof playerId !== "string" || !ID_RE.test(playerId)) {
+    return json({ access_token });
+  }
+  const room = await discordRoom(env.DISCORD_CLIENT_SECRET, instanceId);
+  return json({ access_token, room, ticket: await roomTicket(env.DISCORD_CLIENT_SECRET, room, playerId) });
+}
+
+/**
+ * Only our own pages get TURN credentials (they cost money per GB relayed):
+ * same-origin requests, or the Discord Activity proxy.
+ */
+function fromOurPages(req: Request): boolean {
+  const site = req.headers.get("Sec-Fetch-Site");
+  if (site === "same-origin") return true;
+  const origin = req.headers.get("Origin") ?? "";
+  return /^https:\/\/[0-9]+\.discordsays\.com$/.test(origin) || origin === new URL(req.url).origin;
+}
+
+/** STUN always; short-lived TURN credentials too when a TURN key is configured. */
+async function iceServers(req: Request, env: Env): Promise<Response> {
+  if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN || !fromOurPages(req)) return json({ iceServers: STUN });
+  try {
+    const res = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${env.TURN_KEY_API_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ ttl: 6 * 60 * 60 }),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const body = (await res.json()) as { iceServers: RTCIceServer | RTCIceServer[] };
+    const turn = Array.isArray(body.iceServers) ? body.iceServers : [body.iceServers];
+    return json({ iceServers: [...STUN, ...turn] });
+  } catch {
+    return json({ iceServers: STUN });
+  }
+}
+
+/**
+ * One instance per room. Relays envelopes between sockets and tells everyone
+ * the connection order; the earliest player connection is the host. Phone
+ * remotes are relayed like players but are never host. Uses the
+ * hibernation API so idle rooms cost nothing.
+ */
+export class RelayRoom extends DurableObject<Env> {
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+
+  async fetch(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+    const id = url.searchParams.get("id")!;
+    const role = url.searchParams.get("role") === "remote" ? "remote" : "player";
+    // A reconnecting player replaces their old socket.
+    for (const ws of this.ctx.getWebSockets(id)) ws.close(4000, "replaced");
+    if (this.sockets().length >= MAX_SOCKETS_PER_ROOM) return json({ error: "room full" }, 429);
+
+    const { 0: client, 1: server } = new WebSocketPair();
+    this.ctx.acceptWebSocket(server, [id]);
+    const joinedAt = Math.max(Date.now(), ...this.sockets().map((s) => s.att.joinedAt + 1));
+    server.serializeAttachment({ id, joinedAt, role } satisfies Attachment);
+    this.broadcastPeers();
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer) {
+    if (typeof data !== "string" || data.length > MAX_MESSAGE_BYTES) return;
+    let parsed: { to?: unknown; msg?: { t?: unknown } };
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      return;
+    }
+    const { to, msg } = parsed;
+    if ((to !== "host" && to !== "all") || !msg || typeof msg.t !== "string") return;
+
+    const sender = ws.deserializeAttachment() as Attachment;
+    if (msg.t === THROTTLED) {
+      const now = Date.now();
+      if (now - (sender.lastAim ?? 0) < AIM_MIN_INTERVAL_MS) return;
+      ws.serializeAttachment({ ...sender, lastAim: now } satisfies Attachment);
+    }
+    this.evictStale();
+    const ordered = this.sockets();
+    const host = splitPeers(ordered).players[0];
+    if (!host) return;
+    const out = JSON.stringify({ type: "env", env: { from: sender.id, to, msg, ...(sender.role === "remote" ? { remote: true } : {}) } });
+
+    if (to === "host") {
+      if (host.ws !== ws) host.ws.send(out);
+      return;
+    }
+    if (host.ws !== ws && !CLIENT_BROADCASTS.has(msg.t)) return;
+    for (const s of ordered) if (s.ws !== ws) s.ws.send(out);
+  }
+
+  async webSocketClose(ws: WebSocket, code: number) {
+    try {
+      ws.close(code === 1005 ? 1000 : code, "closing");
+    } catch {
+      // already closed
+    }
+    this.broadcastPeers(ws);
+  }
+
+  async webSocketError(ws: WebSocket) {
+    this.broadcastPeers(ws);
+  }
+
+  /**
+   * A host whose connection died without a close (phone locked, network gone)
+   * would otherwise keep swallowing every "host" message until the runtime
+   * notices. Clients ping every 5s, so silence means it's gone.
+   */
+  private evictStale() {
+    const now = Date.now();
+    let evicted = false;
+    for (const { ws, att } of this.sockets()) {
+      const lastPing = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? att.joinedAt;
+      if (now - Math.max(lastPing, att.joinedAt) > STALE_MS) {
+        ws.close(4001, "stale");
+        evicted = true;
+      }
+    }
+    if (evicted) this.broadcastPeers();
+  }
+
+  private sockets(exclude?: WebSocket) {
+    return this.ctx
+      .getWebSockets()
+      .filter((ws) => ws !== exclude && ws.readyState === WebSocket.OPEN)
+      .map((ws) => ({ ws, att: ws.deserializeAttachment() as Attachment }))
+      .filter((s) => s.att)
+      .sort((a, b) => a.att.joinedAt - b.att.joinedAt || a.att.id.localeCompare(b.att.id));
+  }
+
+  /** `ids`: players in connection order, so ids[0] is host. `remotes`: phone remotes. */
+  private broadcastPeers(exclude?: WebSocket) {
+    const sockets = this.sockets(exclude);
+    const { players, remotes } = splitPeers(sockets);
+    const out = JSON.stringify({ type: "peers", ids: players.map((s) => s.att.id), remotes: remotes.map((s) => s.att.id) });
+    for (const s of sockets) s.ws.send(out);
+  }
+}

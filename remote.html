@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#140a12" />
+    <meta name="robots" content="noindex" />
+    <title>Phone · Carnival Dozer</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script src="/boot-guard.js"></script>
+  </head>
+  <body>
+    <div id="app" class="remote">
+      <header class="r-top">
+        <div id="r-me" class="r-me"></div>
+        <div class="r-top-right">
+          <button id="r-mute" class="r-icon" type="button" aria-label="Mute sounds">🔊</button>
+          <div id="r-conn" class="r-conn">Offline</div>
+        </div>
+      </header>
+
+      <main class="r-main">
+        <div class="r-stats">
+          <div class="r-coins"><span id="r-coins">0</span> <span class="coin-icon" aria-hidden="true"></span></div>
+          <div id="r-score" class="r-score"></div>
+        </div>
+        <div id="r-tilt" class="r-tilt" aria-label="Tilt alarm"><span>TILT</span><div class="tilt-track"><div id="r-tilt-fill" class="tilt-fill"></div></div></div>
+        <div id="zone" class="r-pad waiting" role="button" tabindex="0" aria-label="Hold, roll to aim, flick to drop a coin">
+          <div class="r-gauge" aria-hidden="true"><div id="r-needle" class="r-needle"></div></div>
+          <div class="zone-title">Phone</div>
+          <div class="zone-sub"></div>
+        </div>
+        <button id="r-shake" class="shake-btn wide" type="button" hidden>SHAKE</button>
+        <div id="r-hint" class="r-hint" aria-live="polite"></div>
+      </main>
+
+      <section id="r-start" class="r-layer">
+        <div class="r-card">
+          <div class="r-big">📱🪙</div>
+          <h1>Your phone is your coin hand</h1>
+          <p>The shelf is on the big screen. Here you hold, roll your wrist to aim and flick to drop coins. Let go and jerk the phone up to shake the shelf.</p>
+          <button id="r-connect" class="primary" type="button">Tap to connect</button>
+          <p class="r-small">On iPhone, allow motion access when asked.</p>
+        </div>
+      </section>
+
+      <section id="r-message" class="r-layer" hidden>
+        <div class="r-card">
+          <h1 id="r-msg-title"></h1>
+          <p id="r-msg-text"></p>
+          <button id="r-retry" class="primary" type="button" hidden>Try again</button>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/src/remote/main.ts"></script>
+  </body>
+</html>

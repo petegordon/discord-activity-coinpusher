@@ -252,17 +252,34 @@ export class DozerSim {
     );
   }
 
-  /** Nudge everything on the shelf. `strength` 1 is a single player's shake, 3 a synchronized one. */
+  /**
+   * Jolt the shelf. `strength` 1 is a single player's shake, 3 a synchronized one.
+   * Mostly a jiggle: everything hops a little and wobbles. The jolt has a
+   * direction picked at random each time, usually forward-ish, sometimes
+   * sideways, now and then backward, so shaking doesn't just sweep the coins
+   * off the front. Prizes (light and tall) feel it more than the heavy coins.
+   */
   shake(strength: number) {
+    const r = this.rand();
+    // Forward 60% of the time, sideways 25%, backward 15%.
+    const angle = r < 0.6 ? (this.rand() - 0.5) * 1.2 : r < 0.85 ? (this.rand() < 0.5 ? -1 : 1) * (1.2 + this.rand() * 0.6) : Math.PI + (this.rand() - 0.5) * 1.2;
+    const dx = Math.sin(angle);
+    const dz = Math.cos(angle);
     for (const { body, kind } of this.bodies.values()) {
       const m = body.mass();
       const prize = kind !== KIND_COIN;
-      const forward = (prize ? 0.11 : 0.05) * strength;
+      const push = (prize ? 0.1 : 0.012) * strength * (0.5 + this.rand());
+      const wobble = (prize ? 0.02 : 0.015) * strength;
       body.applyImpulse(
-        { x: m * (this.rand() - 0.5) * 0.04 * strength, y: m * (0.18 + this.rand() * 0.06) * Math.sqrt(strength), z: m * forward * (0.7 + this.rand() * 0.6) },
+        {
+          x: m * (dx * push + (this.rand() - 0.5) * wobble),
+          y: m * (0.09 + this.rand() * 0.05) * Math.sqrt(strength),
+          z: m * (dz * push + (this.rand() - 0.5) * wobble),
+        },
         true,
       );
-      if (prize) body.applyTorqueImpulse({ x: m * 0.0006 * strength, y: 0, z: m * (this.rand() - 0.5) * 0.0006 * strength }, true);
+      // Prizes rock as the shelf jolts, which is what tips a teetering tower.
+      if (prize) body.applyTorqueImpulse({ x: m * 0.0012 * strength * dz, y: 0, z: -m * 0.0012 * strength * dx }, true);
     }
   }
 

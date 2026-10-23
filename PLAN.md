@@ -38,6 +38,7 @@ All in `src/game/rules.ts`.
   - Shakes from different players within **300 ms** combine into one **strong** shake (3×).
   - A lone shake, with others at the table, is a **gentle** nudge (1×).
   - Playing alone, every shake is strong, since there's nobody to sync with.
+  - A shake is mostly a jiggle: everything hops and wobbles. Each shake also jolts in a random direction: forward 60% of the time, sideways 25%, backward 15%. Prizes feel it about 8× more than coins, so shaking rocks the tower without sweeping the coins off (changed 2026-10-22 after Pete found shakes cleared the shelf).
 - **Prize tower.** Four stacked gift boxes worth **10, 20, 30 and 50** points, bottom to top, set slightly off-centre so they teeter.
   - A prize that falls into the tray scores for the team. A prize that falls into a gutter is lost.
   - A new tower arrives 1.5 s after the last prize leaves the shelf.
@@ -47,7 +48,7 @@ All in `src/game/rules.ts`.
 
 Measured in the simulation (`test/sim.test.ts` and a 30 s diagnostic):
 - Once the shelf is full, roughly as many coins fall off as are dropped. About a third of them go into the gutters.
-- **Without shakes, the tower never fell in 30 s. With a synchronized shake every 4 s, it fell in 8–24 s.**
+- **One strong shake knocks off about 0.7 coins (vs 0.3 in the same 2 s without it; it was 3.7 before the change).** With two players dropping and a synchronized shake every 4 s, the first prize falls at 8–60 s, about 5 prizes a minute. Without shakes, prizes rarely fall.
 
 So shaking is what wins prizes, and the tilt meter stops it being free.
 

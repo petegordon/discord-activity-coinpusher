@@ -54,15 +54,25 @@ describe("DozerSim", () => {
     expect(tray).toBeGreaterThan(0);
   });
 
-  it("a shake moves the prizes forward", () => {
-    sim.reset(9);
-    const before = sim.all().filter((b) => b.kind !== KIND_COIN);
-    sim.shake(3);
-    run(sim, 0.4);
-    const after = sim.all().filter((b) => b.kind !== KIND_COIN);
-    const dz = after.reduce((a, b) => a + b.p[2] - (before.find((x) => x.id === b.id)?.p[2] ?? b.p[2]), 0);
-    expect(before.length).toBe(4);
-    expect(dz).toBeGreaterThan(0);
+  it("a shake rocks the prizes but doesn't sweep the coins off", () => {
+    let moved = 0;
+    let coinsOff = 0;
+    for (const seed of [9, 10, 11, 12]) {
+      sim.reset(seed);
+      run(sim, 1);
+      sim.takeOuts();
+      const before = sim.all().filter((b) => b.kind !== KIND_COIN);
+      expect(before.length).toBe(4);
+      sim.shake(3);
+      run(sim, 2);
+      coinsOff += sim.takeOuts().filter((o) => o.kind === KIND_COIN).length;
+      for (const b of sim.all().filter((x) => x.kind !== KIND_COIN)) {
+        const was = before.find((x) => x.id === b.id);
+        if (was) moved += Math.hypot(b.p[0] - was.p[0], b.p[2] - was.p[2]);
+      }
+    }
+    expect(moved / 16).toBeGreaterThan(0.002); // each prize shifts a few mm on average
+    expect(coinsOff / 4).toBeLessThan(2); // a strong shake knocks off a coin or so, not a wave
   });
 
   it("stops the pusher while locked", () => {

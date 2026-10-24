@@ -170,8 +170,9 @@ try {
   const aim = await within(aimSeen, 10_000, "aim seen at the table");
   const drop = await within(dropSeen, 10_000, "drop seen at the table");
   if (drop.by !== bobId) fail("the phone's drop was credited to someone else");
-  await bob.waitForFunction((id) => window.dozer.room.game.coins[id] === 29, bobId, { timeout: 5_000, ...poll });
-  console.log(`phone flick: dropped for Bob, aimed ${aim.toFixed(2)} rad; Bob has 29 coins`);
+  // Count drops, not coins in hand: coins pushed into the tray come back to the nearest chute at any time.
+  await bob.waitForFunction(() => window.dozer.room.game.dropped === 1, null, { timeout: 5_000, ...poll });
+  console.log(`phone flick: dropped for Bob, aimed ${aim.toFixed(2)} rad; Bob sees 1 coin dropped`);
   await remote.screenshot({ path: `${outDir}/remote-${transport}-phone.png` });
   await alice.screenshot({ path: `${outDir}/remote-${transport}-table.png` });
 
@@ -194,9 +195,9 @@ try {
   const after = await bob.evaluate(() => window.dozer.room.bodies.size);
   console.log(`host left: Bob is host, the shelf carried over (${before} -> ${after} bodies), phone still paired`);
   if (Math.abs(after - before) > 20) fail("the shelf was rebuilt instead of carried over");
-  const coins = (await game(bob)).coins[bobId];
+  const dropped = (await game(bob)).dropped;
   await rollAndFlick(remote, -20);
-  await bob.waitForFunction(([id, n]) => window.dozer.room.game.coins[id] < n, [bobId, coins], { timeout: 5_000, ...poll });
+  await bob.waitForFunction((n) => window.dozer.room.game.dropped > n, dropped, { timeout: 5_000, ...poll });
   console.log("phone still drops for Bob after the migration");
 
   // ---- 4. New link revokes the old one ----

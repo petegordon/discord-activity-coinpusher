@@ -37,7 +37,9 @@ export type Msg =
   /** player → host: forget my phone remote */
   | { t: "unpair" }
   /** remote → host, on (re)connect: please send the current state */
-  | { t: "remote-hello" };
+  | { t: "remote-hello" }
+  /** relay → all (from "server", never a player): `playerId` just earned these achievements on their House Tandem account */
+  | { t: "achievement"; playerId: string; ids: string[] };
 
 export type Target = "host" | "all";
 
@@ -53,7 +55,10 @@ export const CLIENT_BROADCASTS: ReadonlySet<string> = new Set(["aim"]);
 /** Cosmetic broadcasts that transports rate-limit per sender. */
 export const THROTTLED = "aim";
 
-const MSG_TYPES = new Set(["hello", "state", "frame", "aim", "drop", "shake", "pair", "unpair", "remote-hello"]);
+const MSG_TYPES = new Set(["hello", "state", "frame", "aim", "drop", "shake", "pair", "unpair", "remote-hello", "achievement"]);
+
+/** The relay speaks as this id; player ids are 16 hex chars, so no player can be it. */
+export const SERVER_ID = "server";
 
 export type Role = "player" | "remote";
 

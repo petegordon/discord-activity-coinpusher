@@ -4,6 +4,8 @@ import { CLIENT_BROADCASTS, THROTTLED } from "../../src/net/protocol";
 import { splitPeers, type Attachment } from "./peers";
 import { DISCORD_ROOM_RE, discordRoom, readRoomTicket, roomTicket } from "./roomTicket";
 import { RANGED_RE, withRanges } from "./ranges";
+import { Scorekeeper, type GamesService } from "./scorekeeper";
+import { ACHIEVEMENTS } from "../../src/achievements/defs";
 
 export interface Env {
   RELAY: DurableObjectNamespace<RelayRoom>;
@@ -19,10 +21,9 @@ export interface Env {
 
 /**
  * The House Tandem account service (Tandemonium's API Worker, entrypoint
- * HouseTandemGames). gameProfile and recordGame are there for achievements,
- * which this game doesn't save yet.
+ * HouseTandemGames): sign-in, plus gameProfile/recordGame for achievements.
  */
-export type HouseTandem = {
+export type HouseTandem = GamesService & {
   resolveDiscord(profile: { discordId: string; name: string; avatar?: string }): Promise<{ userId: number | string; name: string; avatar?: string }>;
   verifySession(token: string): Promise<{ userId: number | string; name: string; avatar?: string } | null>;
 };
@@ -51,6 +52,12 @@ export default {
 
     if (url.pathname === "/api/token" && req.method === "POST") return exchangeToken(req, env);
     if (url.pathname === "/api/ice" && req.method === "GET") return iceServers(req, env);
+    // The achievement list, for housetandem.com's profile page and anyone else.
+    if (url.pathname === "/api/achievements" && req.method === "GET") {
+      return new Response(JSON.stringify({ game: "coins", achievements: ACHIEVEMENTS }), {
+        headers: { "content-type": "application/json", "access-control-allow-origin": "*", "cache-control": "public, max-age=300" },
+      });
+    }
 
     const relay = url.pathname.match(/^\/api\/relay\/([^/]+)$/);
     if (relay) {
@@ -199,9 +206,58 @@ async function iceServers(req: Request, env: Env): Promise<Response> {
  * can credit achievements.
  */
 export class RelayRoom extends DurableObject<Env> {
+  /**
+   * Achievements for signed-in players. The host's browser runs the shelf, so
+   * the room checks what passes through before crediting anything: see the
+   * trust model in src/achievements/referee.ts.
+   */
+  private scorekeeper: Scorekeeper | null = null;
+  /** Phone remote id → the player it plays for, from the host's last state. */
+  private remoteOwner = new Map<string, string>();
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+    if (env.HT) {
+      this.scorekeeper = new Scorekeeper({
+        ht: env.HT,
+        toast: (playerId, ids) => this.toast(playerId, ids),
+        wait: (p) => ctx.waitUntil(p),
+        log: (...a) => console.warn(...a),
+      });
+    }
+  }
+
+  /** Everyone at the table hears about it; the game shows the player's own as theirs. */
+  private toast(playerId: string, ids: string[]) {
+    const out = JSON.stringify({ type: "env", env: { from: "server", to: "all", msg: { t: "achievement", playerId, ids } } });
+    for (const s of this.sockets()) s.ws.send(out);
+  }
+
+  /** Feed the scorekeeper what this message shows (it never changes what's relayed). */
+  private score(ws: WebSocket, sender: Attachment, hostWs: WebSocket, to: string, msg: Record<string, unknown>, ordered: { ws: WebSocket; att: Attachment }[]) {
+    const sk = this.scorekeeper;
+    if (!sk) return;
+    const now = Date.now();
+    const players = splitPeers(ordered).players;
+    sk.seat(players[0]?.att.id ?? null, new Map(players.filter((s) => s.att.userId).map((s) => [s.att.id, s.att.userId!])));
+    if (to === "host" && ws !== hostWs && (msg.t === "drop" || msg.t === "shake")) {
+      const playerId = sender.role === "remote" ? this.remoteOwner.get(sender.id) : sender.id;
+      if (playerId) sk.request(playerId, msg as { t: string; aim?: unknown }, sender.role === "remote", now);
+      return;
+    }
+    if (to !== "all" || ws !== hostWs) return;
+    if (msg.t === "state" && Array.isArray(msg.players)) {
+      this.remoteOwner = new Map(
+        (msg.players as { id?: unknown; remoteId?: unknown }[])
+          .filter((p) => typeof p?.id === "string" && typeof p?.remoteId === "string")
+          .map((p) => [p.remoteId as string, p.id as string]),
+      );
+      sk.state(msg.game as never, now);
+    } else if (msg.t === "frame") {
+      const events = (msg.f as { events?: unknown } | undefined)?.events;
+      if (Array.isArray(events)) sk.frame(events as never, now);
+    }
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -243,6 +299,11 @@ export class RelayRoom extends DurableObject<Env> {
     const host = splitPeers(ordered).players[0];
     if (!host) return;
     const out = JSON.stringify({ type: "env", env: { from: sender.id, to, msg, ...(sender.role === "remote" ? { remote: true } : {}) } });
+    try {
+      this.score(ws, sender, host.ws, to, msg as Record<string, unknown>, ordered);
+    } catch (e) {
+      console.warn("scorekeeper", e);
+    }
 
     if (to === "host") {
       if (host.ws !== ws) host.ws.send(out);
@@ -259,6 +320,8 @@ export class RelayRoom extends DurableObject<Env> {
       // already closed
     }
     this.broadcastPeers(ws);
+    // Last one out: save what's pending before the room sleeps.
+    if (this.sockets(ws).length === 0) this.scorekeeper?.flushAll(Date.now());
   }
 
   async webSocketError(ws: WebSocket) {

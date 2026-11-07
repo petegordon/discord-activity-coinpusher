@@ -103,6 +103,8 @@ export class HostAuthority {
   private lastShake = new Map<string, number>();
   private shakeWindow: { closes: number; by: string[] } | null = null;
   private quietSince: number | null = null;
+  /** Coins dropped this game, by body id: who dropped them and how they were aimed (for Bank Shot). */
+  private owners = new Map<number, { by: string; aim: number }>();
   private readonly now: () => number;
   private readonly newId: () => string;
   private readonly newSeed: () => number;
@@ -201,6 +203,7 @@ export class HostAuthority {
     this.shakeWindow = null;
     this.quietSince = null;
     this.events = [];
+    this.owners.clear();
     this.forceKey = true;
     if (this.sim) this.sim.reset(this.newSeed());
     else this.pendingReset = true;
@@ -218,11 +221,14 @@ export class HostAuthority {
     if (!this.sim || this.isLocked || !canDrop(this.game, from)) return [];
     if (t - (this.lastDrop.get(from) ?? -Infinity) < DROP_COOLDOWN_MS) return [];
     const lane = this.game.order.indexOf(from);
-    const id = this.sim.drop(chuteX(lane, this.game.order.length), clampAim(num(aim)), clamp01(num(power, 0.5)), Math.max(-1, Math.min(1, num(spin))));
+    const a = clampAim(num(aim));
+    const id = this.sim.drop(chuteX(lane, this.game.order.length), a, clamp01(num(power, 0.5)), Math.max(-1, Math.min(1, num(spin))));
     if (id === null) return [];
     this.lastDrop.set(from, t);
     this.game = takeCoin(this.game, from);
-    this.events.push({ k: "drop", by: from });
+    this.owners.set(id, { by: from, aim: a });
+    if (this.owners.size > 2000) this.owners.delete(this.owners.keys().next().value!);
+    this.events.push({ k: "drop", by: from, aim: Math.round(a * 1000) / 1000 });
     return [this.state()];
   }
 
@@ -258,11 +264,13 @@ export class HostAuthority {
     const n = this.game.order.length;
     for (const o of outs) {
       const before = this.game;
+      const owner = o.id !== undefined ? this.owners.get(o.id) : undefined;
+      if (o.id !== undefined) this.owners.delete(o.id);
       if (o.kind === KIND_COIN) {
         if (o.tray) {
           const lane = laneAt(o.x, n);
           this.game = coinWon(this.game, lane);
-          this.events.push({ k: "won", x: o.x, lane });
+          this.events.push(owner ? { k: "won", x: o.x, lane, by: owner.by, aim: Math.round(owner.aim * 1000) / 1000 } : { k: "won", x: o.x, lane });
         } else {
           this.game = coinLost(this.game);
           this.events.push({ k: "lost", x: o.x });

@@ -1,3 +1,4 @@
+import { ACHIEVEMENT_BY_ID } from "./achievements/defs";
 import "./style.css";
 import { renderSVG } from "uqr";
 import { CoinAudio } from "./audio";
@@ -297,6 +298,12 @@ async function boot() {
     if (player !== self.id || remoteOnline()) scene.setAim(player, aim);
   });
 
+  r.on("achievement", (playerId, ids) => {
+    for (const id of ids) {
+      const def = ACHIEVEMENT_BY_ID.get(id);
+      if (def) ui.achievement(def.icon, def.name, playerId === self.id ? null : (players.find((p) => p.id === playerId)?.name ?? "Someone"));
+    }
+  });
   r.on("role", () => refresh());
   r.on("status", (s) => ui.showRemoteButton(s.kind === "connected"));
   r.on("status", (s) => ui.status(s, transportKind === "peerjs" && s.kind === "failed" ? inviteLink(roomId, "relay") : undefined));

@@ -21,7 +21,8 @@ export function loadRapier(): Promise<Rapier> {
 }
 
 /** Something fell off the shelf. */
-export type Out = { kind: number; x: number; tray: boolean };
+/** A body that left the shelf. `id` is its body id (coin ownership is tracked by the host). */
+export type Out = { kind: number; x: number; tray: boolean; id?: number };
 
 
 const STEP_S = 1 / 120;
@@ -352,7 +353,7 @@ export class DozerSim {
       if (body.isSleeping()) continue;
       const p = body.translation();
       if (p.y > OUT_Y && Math.abs(p.x) < 1 && p.y < 2 && p.z < 1) continue;
-      this.outs.push({ kind, x: p.x, tray: p.y <= OUT_Y && p.z > TABLE.frontZ - 0.02 && Math.abs(p.x) <= TABLE.trayHalfWidth });
+      this.outs.push({ id, kind, x: p.x, tray: p.y <= OUT_Y && p.z > TABLE.frontZ - 0.02 && Math.abs(p.x) <= TABLE.trayHalfWidth });
       this.world.removeRigidBody(body);
       this.bodies.delete(id);
       this.lastSent.delete(id);

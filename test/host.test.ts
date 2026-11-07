@@ -49,7 +49,7 @@ describe("HostAuthority", () => {
     expect(host.handle("b", { t: "drop", aim: 0, power: 0.5, spin: 0 })).toEqual([]);
     advance(DROP_COOLDOWN_MS);
     expect(host.handle("b", { t: "drop", aim: 0, power: 0.5, spin: 0 })[0].t).toBe("state");
-    expect(events(advance(FRAME_MS + 20))).toContainEqual({ k: "drop", by: "b" });
+    expect(events(advance(FRAME_MS + 20))).toContainEqual({ k: "drop", by: "b", aim: 0 });
   });
 
   it("refuses drops before the game, with no coins, and from strangers", () => {

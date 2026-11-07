@@ -3,7 +3,7 @@
 //   node scripts/logo-3d.mjs out.png '{"fov":15,...}' [baseUrl]   (baseUrl defaults to https://coins.housetandem.com)
 // The coin pile settles differently every run, so take a few shots and pick one.
 // The shipped logo (public/brand/carnival-dozer-3d-*.png) used:
-//   '{"light":false,"env":0.4,"metal":0.6,"rough":0.32,"gold":"#f2b53a","bump":3,"exp":0.92,"tiltY":-0.3,"tiltZ":-0.06,"hy":0.023,"hz":0.05,"tiltX":-0.2,"laneW":0.036,"fov":15,"cam":[-0.045,0.1,0.4],"look":[-0.007,0.036,0],"starEnv":0.25,"starRough":0.42,"stars":[[-0.022,0.004,0.05,0.22,1.1,-0.04],[0.03,0.004,0.035,0.28,-0.6,0.05]]}'
+//   '{"light":false,"env":0.4,"metal":0.6,"rough":0.32,"gold":"#f2b53a","bump":3,"exp":0.92,"tiltY":-0.3,"tiltZ":-0.06,"hz":0.05,"tiltX":-0.2,"laneW":0.036,"fov":15,"cam":[-0.045,0.1,0.4],"look":[-0.007,0.036,0],"starEnv":0.25,"starRough":0.42,"flats":[[-0.026,0.05,0.22,1.1,-0.04,"tails"],[0.03,0.04,0.26,-0.25,0.05,"heads"],[0.006,0.088,0.24,0.1,0.0,"heads"],[0.052,-0.002,0.22,-0.6,0.0,"tails"],[-0.05,0.0,0.22,0.35,0.03,"heads"]]}'
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright-core");
@@ -42,24 +42,39 @@ await p.evaluate((cfg) => {
   hero.position.set(cfg.hx ?? 0, (cfg.hy ?? r + 0.003), front + (cfg.hz ?? 0.028));
   hero.rotation.set((cfg.tails ? -Math.PI / 2 : Math.PI / 2) + (cfg.tiltX ?? -0.12), cfg.tiltY ?? 0.35, cfg.tiltZ ?? 0.12, "YXZ");
   s.cabinet.add(hero);
-  // Coins lying star side up, placed relative to the hero: [dx, y, dz, rx, ry, rz] (rx 0 = flat, tails up).
+  // Set a mesh down so its lowest vertex just touches the felt (y = 0).
+  const V3 = cam.position.constructor;
+  const restOnFloor = (mesh) => {
+    mesh.updateMatrix();
+    const pos = mesh.geometry.attributes.position, v = new V3();
+    let min = Infinity;
+    for (let i = 0; i < pos.count; i++) min = Math.min(min, v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrix).y);
+    mesh.position.y += 0.0002 - min;
+  };
+  restOnFloor(hero);
+  // Coins lying on the felt around the hero: [dx, dz, tilt x, yaw, tilt z, "heads" | "tails"].
+  // "stars" is the older form, [dx, y, dz, rx, ry, rz], always tails; its y is ignored.
+  const flats = [...(cfg.flats ?? []), ...(cfg.stars ?? []).map(([dx, , dz, rx, ry, rz]) => [dx, dz, rx, ry, rz, "tails"])];
   const starSpots = [];
   const starMats = mats.map((m) => { const c = m.clone(); c.envMapIntensity = cfg.starEnv ?? m.envMapIntensity; c.roughness = cfg.starRough ?? m.roughness; return c; });
-  for (const [dx, y, dz, rx, ry, rz] of cfg.stars ?? []) {
-    const star = new pusher.constructor(hero.geometry, starMats);
-    starSpots.push([hero.position.x + dx, hero.position.z + dz]);
-    star.castShadow = star.receiveShadow = true;
-    star.position.set(hero.position.x + dx, y, hero.position.z + dz);
-    star.rotation.set(Math.PI + rx, ry, rz, "YXZ");
-    s.cabinet.add(star);
+  for (const [dx, dz, rx, ry, rz, face] of flats) {
+    const coin = new pusher.constructor(hero.geometry, starMats);
+    coin.castShadow = coin.receiveShadow = true;
+    coin.position.set(hero.position.x + dx, 0, hero.position.z + dz);
+    coin.rotation.set((face === "tails" ? Math.PI : 0) + rx, ry, rz, "YXZ");
+    restOnFloor(coin);
+    starSpots.push([coin.position.x, coin.position.z]);
+    s.cabinet.add(coin);
   }
   // Clear a lane of pile coins between the camera and the hero coin.
   if (cfg.lane !== false) {
     const hz = hero.position.z, hx = hero.position.x, w = cfg.laneW ?? 0.06;
     const orig = coins.setMatrixAt.bind(coins);
     const zero = s.tmp.clone().makeScale(0, 0, 0);
-    coins.setMatrixAt = (i, m) => { const e = m.elements; const nearStar = starSpots.some(([x, z]) => Math.hypot(e[12] - x, e[14] - z) < (cfg.starClear ?? 0.04));
-      orig(i, ((e[14] > hz - (cfg.laneBack ?? 0.012) && Math.abs(e[12] - hx) < w) || nearStar) ? zero : m); };
+    coins.setMatrixAt = (i, m) => { const e = m.elements; // Anything close enough to touch the hero or a star coin goes too, so no coin cuts into another.
+      const nearStar = starSpots.some(([x, z]) => Math.hypot(e[12] - x, e[14] - z) < (cfg.starClear ?? 0.05));
+      const nearHero = Math.hypot(e[12] - hx, e[14] - hz) < (cfg.heroClear ?? 0.05);
+      orig(i, ((e[14] > hz - (cfg.laneBack ?? 0.012) && Math.abs(e[12] - hx) < w) || nearStar || nearHero) ? zero : m); };
   }
   if (cfg.light !== false) {
     const L = s.dropLight.constructor;

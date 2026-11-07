@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { chuteX, START_PILE, TABLE } from "../src/game/rules";
+import { chuteX, COIN, START_PILE, TABLE } from "../src/game/rules";
 import { KIND_COIN, packBodies, unpackBodies } from "../src/sim/frame";
 import { DozerSim, loadRapier, pusherAt, TAILS_UP_SHARE } from "../src/sim/world";
 
@@ -52,6 +52,23 @@ describe("DozerSim", { timeout: 20_000 }, () => {
       console.log(`seed ${seed}: ${(tails * 100).toFixed(0)}% tails up of ${flat.length} flat coins`);
       expect(tails).toBeGreaterThanOrEqual(0.35);
       expect(tails).toBeLessThanOrEqual(0.45);
+    }
+  });
+
+  it("never lets a coin sink into the felt", () => {
+    for (const seed of [42, 7, 9]) {
+      sim.reset(seed);
+      run(sim, 3);
+      let lowest = Infinity;
+      for (const { kind, p, q: [x, , z] } of sim.all()) {
+        if (kind !== KIND_COIN || Math.abs(p[0]) > TABLE.halfWidth || p[2] > TABLE.frontZ) continue;
+        // The coin's lowest point: half its thickness along its axis, plus its radius across the tilt.
+        const upY = Math.abs(1 - 2 * (x * x + z * z));
+        lowest = Math.min(lowest, p[1] - (COIN.thickness / 2) * upY - COIN.radius * Math.sqrt(Math.max(0, 1 - upY * upY)));
+      }
+      console.log(`seed ${seed}: lowest coin point ${(lowest * 1000).toFixed(2)} mm`);
+      // Rapier lets resting contacts settle up to ~1 mm in under the pile's weight; a sinking coin goes much deeper.
+      expect(lowest).toBeGreaterThan(-0.002);
     }
   });
 

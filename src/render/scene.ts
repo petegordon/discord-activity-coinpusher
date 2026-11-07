@@ -165,6 +165,83 @@ function stripeTexture(): THREE.CanvasTexture {
   return t;
 }
 
+/** The House Tandem controller mark (images/logos/housetandem-controller.svg, viewBox ±420). */
+const CONTROLLER_BUMPER = "M-95 -227 H95 V-156 a34 34 0 0 1 -34 34 H-61 a34 34 0 0 1 -34 -34 Z";
+
+/**
+ * One face of a coin, stamped into the metal: the House Tandem controller on
+ * heads, a star on tails. `bump` draws the raised parts white on black for the
+ * bump map; otherwise it's the colour map, white with darker engraving, which
+ * each coin's instance colour then tints gold.
+ */
+function coinFaceTexture(design: "controller" | "star", bump: boolean): THREE.CanvasTexture {
+  const S = 512;
+  const C = S / 2;
+  const c = document.createElement("canvas");
+  c.width = c.height = S;
+  const g = c.getContext("2d")!;
+  g.fillStyle = bump ? "#000" : "#fff";
+  g.fillRect(0, 0, S, S);
+  const ink = bump ? "#fff" : "#a8875a";
+  g.strokeStyle = ink;
+  g.fillStyle = ink;
+  // Rim: a raised ring and a fine inner line.
+  g.lineWidth = 22;
+  g.beginPath();
+  g.arc(C, C, 228, 0, Math.PI * 2);
+  g.stroke();
+  g.lineWidth = 5;
+  g.beginPath();
+  g.arc(C, C, 198, 0, Math.PI * 2);
+  g.stroke();
+  if (design === "controller") {
+    g.save();
+    g.translate(C, C);
+    // CylinderGeometry maps the cap texture a quarter-turn round; turn it back so the bumper is on top.
+    g.rotate(-Math.PI / 2);
+    g.translate(0, 6);
+    g.scale(0.43, 0.43);
+    g.lineWidth = 40;
+    g.beginPath();
+    g.roundRect(-339.5, -208.5, 679, 417, 208.5);
+    g.stroke();
+    g.fill(new Path2D(CONTROLLER_BUMPER));
+    g.beginPath();
+    g.arc(-127, 3, 70, 0, Math.PI * 2);
+    g.fill();
+    g.lineWidth = 44;
+    g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(127, -51);
+    g.lineTo(127, 57);
+    g.moveTo(73, 3);
+    g.lineTo(181, 3);
+    g.stroke();
+    g.restore();
+  } else {
+    g.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 ? 58 : 146;
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      g.lineTo(C + r * Math.cos(a), C + r * Math.sin(a));
+    }
+    g.closePath();
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  if (!bump) t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+/** Coin materials in CylinderGeometry group order: edge, top (heads), bottom (tails). */
+function coinMaterials(): THREE.MeshStandardMaterial[] {
+  const base = { color: "#ffffff", metalness: 0.85, roughness: 0.36, envMapIntensity: 0.8 };
+  const face = (design: "controller" | "star") =>
+    new THREE.MeshStandardMaterial({ ...base, map: coinFaceTexture(design, false), bumpMap: coinFaceTexture(design, true), bumpScale: 1.5 });
+  return [new THREE.MeshStandardMaterial(base), face("controller"), face("star")];
+}
+
 /** A coin just dropped glows in its dropper's colour for this long (ms). */
 const GLOW_MS = 1600;
 const GOLD = new THREE.Color("#ffc94a");
@@ -232,8 +309,8 @@ export class DozerScene {
 
     const coinGeo = new THREE.CylinderGeometry(COIN.radius, COIN.radius, COIN.thickness, 28);
     // White here; each coin's gold (and a fresh drop's glow) comes from its instance colour.
-    const coinMat = new THREE.MeshStandardMaterial({ color: "#ffffff", metalness: 0.85, roughness: 0.36, envMapIntensity: 0.8 });
-    this.coins = new THREE.InstancedMesh(coinGeo, coinMat, MAX_COINS);
+    // Heads shows the House Tandem controller, tails a star.
+    this.coins = new THREE.InstancedMesh(coinGeo, coinMaterials(), MAX_COINS);
     for (let i = 0; i < MAX_COINS; i++) this.coins.setColorAt(i, GOLD);
     this.coins.instanceColor!.setUsage(THREE.DynamicDrawUsage);
     this.cabinet.add(this.dropLight);

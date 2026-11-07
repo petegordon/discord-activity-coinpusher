@@ -83,7 +83,7 @@ Every 30th frame, and whenever someone joins, the frame is a **keyframe** with e
 Every client keeps the latest pose of every body from the frames. When the host leaves, the next host loads Rapier and rebuilds the shelf from those poses (velocities start at rest). It keeps the same ids, so nobody's view jumps. It carries the tilt meter and any lock over too. `scripts/e2e-remote.mjs` checks this: 194 bodies before the host left, 194 after.
 
 ## 3. Input (`src/input/`)
-- **Aim** comes from gravity across the phone's short axis (`rollDeg`). It works the same whether you hold the phone flat and pointing forward, or upright like a steering wheel. A **35° roll** turns the chute fully (±30°).
+- **Aim** comes from gravity across the phone's short axis (`rollDeg`). It works the same whether you hold the phone flat and pointing forward, or upright like a steering wheel. A **35° roll** turns the chute fully (±40°). Chutes sit toward the middle (within the win tray for up to four players), so every player can aim both ways.
 - **Flick (drop)**: any jerk of **≥13 m/s²** while holding the pad. Its strength sets how far the coin flies.
   - The coin goes where you were aiming **120 ms before** the flick, because the flick itself tips the phone.
   - The roll *rate* just before the flick sets the coin's **spin** (±300°/s is full), so it lands tilted and skids or rolls.

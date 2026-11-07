@@ -29,6 +29,6 @@
   ],
   "vars": {
     // Public Discord application ID. The secret is set with: wrangler secret put DISCORD_CLIENT_SECRET
-    "DISCORD_CLIENT_ID": ""
+    "DISCORD_CLIENT_ID": "1568640867772928160"
   }
 }

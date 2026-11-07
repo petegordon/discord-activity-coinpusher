@@ -138,6 +138,17 @@ export class UI {
    * when a player flicks or shakes their phone.
    */
   /** Standalone web only: who's signed in, or the button to sign in. */
+  /** An achievement just saved to someone's House Tandem account. */
+  achievement(icon: string, name: string, who: string | null) {
+    const t = el("div", { className: "toast" });
+    t.append(
+      el("span", { className: "toast-icon", text: icon }),
+      el("div", {}, el("div", { className: "toast-title", text: who ? `${who} · Achievement` : "Achievement unlocked" }), el("div", { className: "toast-name", text: name })),
+    );
+    $("toasts").append(t);
+    setTimeout(() => t.remove(), 4200);
+  }
+
   showAccount(v: AccountView | null) {
     const box = $("ht-account");
     box.hidden = !v;
@@ -154,7 +165,7 @@ export class UI {
       }
       text.append(`Signed in as ${v.name}`);
     } else {
-      text.textContent = "Play as your House Tandem account";
+      text.textContent = "Sign in to save achievements";
     }
     $("ht-signin").hidden = v.signedIn;
     $("ht-signout").hidden = !v.signedIn;

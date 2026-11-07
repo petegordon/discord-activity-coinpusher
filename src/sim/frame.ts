@@ -17,16 +17,16 @@ export type Body = {
 };
 
 export type SimEvent =
-  /** A coin fell into the tray at `x` and went to lane `lane`. */
-  | { k: "won"; x: number; lane: number }
+  /** A coin fell into the tray at `x` and went to lane `lane`. `by` dropped it, aimed `aim` (absent for coins that started on the shelf). */
+  | { k: "won"; x: number; lane: number; by?: string; aim?: number }
   /** A coin fell into a side gutter. */
   | { k: "lost"; x: number }
   /** A prize fell into the tray. */
   | { k: "prize"; x: number; tier: number; points: number }
   /** A prize fell into a gutter. */
   | { k: "prize-lost"; x: number; tier: number }
-  /** A coin left `by`'s chute. */
-  | { k: "drop"; by: string }
+  /** A coin left `by`'s chute, aimed `aim` radians. */
+  | { k: "drop"; by: string; aim?: number }
   /** The shelf was shaken by `by`, all at once. */
   | { k: "shake"; by: string[]; strength: number }
   | { k: "tilt" }

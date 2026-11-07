@@ -2,7 +2,7 @@ import { HostAuthority, type Carry, type Sim } from "../game/host";
 import { createGame, type GameState } from "../game/dozer";
 import { clampAim } from "../game/rules";
 import { readFrame, unpackBodies, type Body, type Frame } from "../sim/frame";
-import type { Envelope, Msg, Player, Role } from "./protocol";
+import { SERVER_ID, type Envelope, type Msg, type Player, type Role } from "./protocol";
 import { Emitter, type Transport, type TransportStatus } from "./transport";
 
 /** How long a player who disconnects (or a whole table after a host migration) has to come back before being dropped. */
@@ -21,6 +21,8 @@ export type RoomEvents = {
   aim: (player: string, aim: number) => void;
   status: (status: TransportStatus) => void;
   role: (isHost: boolean) => void;
+  /** The relay saved achievements to `playerId`'s House Tandem account. */
+  achievement: (playerId: string, ids: string[]) => void;
 };
 
 /**
@@ -171,6 +173,13 @@ export class Room {
 
   private onMessage(env: Envelope) {
     const { msg } = env;
+    if (msg.t === "achievement") {
+      // Only the relay itself announces achievements; a player can't forge one.
+      if (env.from === SERVER_ID && typeof msg.playerId === "string" && Array.isArray(msg.ids)) {
+        this.events.emit("achievement", msg.playerId, msg.ids.filter((x): x is string => typeof x === "string").slice(0, 25));
+      }
+      return;
+    }
     if (msg.t === "aim") {
       const player = this.playerFor(env.from);
       if (player) this.events.emit("aim", player.id, clampAim(Number(msg.aim)));

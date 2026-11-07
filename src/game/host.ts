@@ -161,7 +161,9 @@ export class HostAuthority {
       const used = new Set(this.players.map((p) => p.color));
       const color = PLAYER_COLORS.find((c) => !used.has(c)) ?? PLAYER_COLORS[this.players.length % PLAYER_COLORS.length];
       const joinedAt = Math.max(this.now(), ...this.players.map((p) => p.joinedAt + 1));
-      this.players.push({ id: from, name, avatarUrl, color, joinedAt });
+      const player: Player = { id: from, name, avatarUrl, color, joinedAt };
+      this.applyAccount(player);
+      this.players.push(player);
       this.game = addPlayer(this.game, from);
     }
     this.forceKey = true;
@@ -368,6 +370,28 @@ export class HostAuthority {
     delete player.remoteId;
     delete player.remoteOnline;
     return [this.state()];
+  }
+
+  /** The relay's latest player id → House Tandem account map (signed-in players only). */
+  private accounts: Record<string, string> = {};
+
+  /**
+   * Which players are signed in to House Tandem, from the relay (it verified
+   * them). Kept for players who join after the peers message arrives.
+   */
+  setAccounts(accounts: Record<string, string>): Msg[] {
+    this.accounts = { ...accounts };
+    let changed = false;
+    for (const p of this.players) changed = this.applyAccount(p) || changed;
+    return changed ? [this.state()] : [];
+  }
+
+  private applyAccount(p: Player): boolean {
+    const id = this.accounts[p.id];
+    if (id === p.accountId) return false;
+    if (id) p.accountId = id;
+    else delete p.accountId;
+    return true;
   }
 
   /** Called with everyone connected; updates the 📱 badges. */

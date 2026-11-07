@@ -13,6 +13,9 @@
     // /screenshots/ runs the worker so the demo reel videos can answer Range requests (worker/src/ranges.ts).
     "run_worker_first": ["/api/*", "/screenshots/*"]
   },
+  // The House Tandem account service (Tandemonium's API Worker): verifies sign-ins over a
+  // private RPC binding (no shared secret). Without it everyone plays as a guest.
+  "services": [{ "binding": "HT", "service": "tandemonium-api", "entrypoint": "HouseTandemGames" }],
   "durable_objects": {
     "bindings": [{ "name": "RELAY", "class_name": "RelayRoom" }]
   },

@@ -803,3 +803,10 @@ input:focus-visible {
     right: 24px;
   }
 }
+
+/* House Tandem sign-in on the standalone web version. */
+.ht-account { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; font-size: 13px; color: var(--muted); margin-top: 4px; }
+.ht-account[hidden] { display: none; }
+.ht-account img { width: 22px; height: 22px; border-radius: 50%; vertical-align: middle; }
+.ht-discord { background: #5865f2 !important; color: #fff !important; border-color: #5865f2 !important; }
+.or { margin: 4px 0 0; text-align: center; }

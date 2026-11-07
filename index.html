@@ -81,6 +81,11 @@
           </div>
           <p id="lobby-wait" class="muted">Waiting for the host to start…</p>
           <button id="lobby-phone" class="secondary" type="button" hidden>📱 Play with your phone</button>
+          <div id="ht-account" class="ht-account" hidden>
+            <span id="ht-account-text"></span>
+            <button id="ht-signin" class="chip-btn ht-discord" type="button" hidden>Sign in with Discord</button>
+            <button id="ht-signout" class="chip-btn" type="button" hidden>Sign out</button>
+          </div>
           <p class="muted small">Play coins only. No real money, no real prizes.</p>
           <p id="legal-links" class="legal"><a href="/terms" target="_blank" rel="noopener">Terms</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy</a></p>
         </div>
@@ -103,6 +108,9 @@
           <label for="name-input">Your name</label>
           <input id="name-input" maxlength="24" autocomplete="nickname" required />
           <button class="primary" type="submit">Step up</button>
+          <p class="muted or">or</p>
+          <button id="name-signin" class="secondary ht-discord" type="button">Sign in with Discord</button>
+          <p class="muted small">Signed in, you play as your House Tandem account.</p>
         </form>
       </section>
 

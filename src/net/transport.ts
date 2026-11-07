@@ -5,8 +5,11 @@ export type TransportKind = "peerjs" | "relay";
 export type TransportEvents = {
   /** An envelope from another player. Never echoes our own sends. */
   message: (env: Envelope) => void;
-  /** Host only: everyone currently connected: players (including self) and phone remotes. */
-  peers: (playerIds: string[]) => void;
+  /**
+   * Host only: everyone currently connected: players (including self) and phone
+   * remotes. `accounts` (relay only): player id → verified House Tandem account.
+   */
+  peers: (playerIds: string[], accounts?: Record<string, string>) => void;
   /** Our host role changed, or we (re)connected to a new host. */
   "host-change": (isHost: boolean) => void;
   status: (status: TransportStatus) => void;

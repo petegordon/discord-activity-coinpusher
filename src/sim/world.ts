@@ -60,6 +60,9 @@ export function pusherAt(t: number): number {
   return mid + amp * Math.sin((2 * Math.PI * t) / TABLE.pusherPeriodS);
 }
 
+/** Share of the starting pile laid star side (tails) up; the rest show the House Tandem controller (heads). */
+export const TAILS_UP_SHARE = 0.4;
+
 function quatFromEuler(x: number, y: number, z: number) {
   const [cx, sx, cy, sy, cz, sz] = [Math.cos(x / 2), Math.sin(x / 2), Math.cos(y / 2), Math.sin(y / 2), Math.cos(z / 2), Math.sin(z / 2)];
   return { x: sx * cy * cz + cx * sy * sz, y: cx * sy * cz - sx * cy * sz, z: cx * cy * sz + sx * sy * cz, w: cx * cy * cz - sx * sy * sz };
@@ -80,6 +83,7 @@ export class DozerSim {
   private pusherT = 0;
   private towerIn: number | null = null;
   private rand: () => number = Math.random;
+  private faceRand: () => number = Math.random;
   private outs: Out[] = [];
   private lastSent = new Map<number, Body>();
   private removed: number[] = [];
@@ -216,7 +220,7 @@ export class DozerSim {
   private addStack(x: number, y: number, z: number, height: number) {
     for (let c = 0; c < height; c++) {
       y += COIN.thickness / 2;
-      this.addCoin({ x: x + (this.rand() - 0.5) * 0.0015, y, z: z + (this.rand() - 0.5) * 0.0015 }, quatFromEuler(0, this.rand() * 6, 0));
+      this.addCoin({ x: x + (this.rand() - 0.5) * 0.0015, y, z: z + (this.rand() - 0.5) * 0.0015 }, quatFromEuler(this.faceRand() < TAILS_UP_SHARE ? Math.PI : 0, this.rand() * 6, 0));
       y += COIN.thickness / 2 + 0.0005;
     }
   }
@@ -240,6 +244,8 @@ export class DozerSim {
   reset(seed: number) {
     this.clear();
     this.rand = mulberry32(seed);
+    // Which face shows comes from its own stream, so the pile's layout (and its tuning) doesn't move.
+    this.faceRand = mulberry32(seed ^ 0x5eed7a11);
     this.time = 0;
     this.pusherT = 0;
     this.locked = false;
@@ -250,13 +256,21 @@ export class DozerSim {
       for (let c = 0; c < cols; c++) cells.push({ x: -TABLE.halfWidth + 0.005 + spacing / 2 + c * spacing, z });
     }
     // Stacks stand on the felt near the front, over the tray, with the pile packed around them.
+    // A coin is the same shape either way up, so flipping one only changes which face shows.
+    // Exactly TAILS_UP_SHARE of the pile, picked at random, so every shelf starts near 40% stars.
+    const order = Array.from({ length: START_PILE }, (_, i) => i);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(this.faceRand() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    const tails = new Set(order.slice(0, Math.round(START_PILE * TAILS_UP_SHARE)));
     for (let i = 0; i < START_PILE; i++) {
       const cell = cells[i % cells.length];
       const layer = Math.floor(i / cells.length);
       const jitter = () => (this.rand() - 0.5) * 0.004;
       this.addCoin(
         { x: cell.x + jitter() + (layer % 2) * spacing * 0.5, y: COIN.thickness / 2 + 0.002 + layer * (COIN.thickness + 0.004), z: cell.z + jitter() + (layer % 2) * spacing * 0.3 },
-        quatFromEuler((this.rand() - 0.5) * 0.2, this.rand() * 6, (this.rand() - 0.5) * 0.2),
+        quatFromEuler((this.rand() - 0.5) * 0.2 + (tails.has(i) ? Math.PI : 0), this.rand() * 6, (this.rand() - 0.5) * 0.2),
       );
     }
     // Let it settle with the pusher running; anything that falls off now doesn't count.

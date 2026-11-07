@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { chuteX, START_PILE, TABLE } from "../src/game/rules";
 import { KIND_COIN, packBodies, unpackBodies } from "../src/sim/frame";
-import { DozerSim, loadRapier, pusherAt } from "../src/sim/world";
+import { DozerSim, loadRapier, pusherAt, TAILS_UP_SHARE } from "../src/sim/world";
 
 let sim: DozerSim;
 beforeAll(async () => {
@@ -39,6 +39,19 @@ describe("DozerSim", { timeout: 20_000 }, () => {
       );
       console.log(`seed ${seed}: ${stacked.length} coins sitting in stacks near the edge`);
       expect(stacked.length).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  it("starts with roughly 40% of the pile star side (tails) up, the rest controller (heads) up", () => {
+    expect(TAILS_UP_SHARE).toBe(0.4);
+    for (const seed of [42, 7, 9]) {
+      sim.reset(seed);
+      // Lying roughly flat; the coin's own up axis (y) rotated by its quaternion, pointing down = tails up.
+      const flat = sim.all().filter((b) => b.kind === KIND_COIN).map(({ q: [x, , z] }) => 1 - 2 * (x * x + z * z)).filter((upY) => Math.abs(upY) > 0.7);
+      const tails = flat.filter((upY) => upY < 0).length / flat.length;
+      console.log(`seed ${seed}: ${(tails * 100).toFixed(0)}% tails up of ${flat.length} flat coins`);
+      expect(tails).toBeGreaterThanOrEqual(0.35);
+      expect(tails).toBeLessThanOrEqual(0.45);
     }
   });
 

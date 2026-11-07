@@ -49,7 +49,9 @@ export const TABLE = {
   /** Chute mouths sit this high, just in front of the back wall. */
   chuteY: 0.16,
   /** The chute turns at most this far either way (radians). */
-  maxAim: (30 * Math.PI) / 180,
+  maxAim: (40 * Math.PI) / 180,
+  /** A chute trough is this wide; neighbours stay at least CHUTE_MIN_GAP apart (centre to centre). */
+  chuteWidth: 0.064,
 } as const;
 
 export const COIN = { radius: 0.022, thickness: 0.008 } as const;
@@ -57,13 +59,19 @@ export const COIN = { radius: 0.022, thickness: 0.008 } as const;
 /** Coins on the table at the start of a game. */
 export const START_PILE = 190;
 
+/** Centre-to-centre room each chute needs: its trough plus a little air. */
+export const CHUTE_MIN_GAP = 0.07;
+
 /**
- * Where each player's chute sits along the back wall, spread evenly in join
- * order. Coins that fall into the tray are credited to the nearest chute.
+ * Where each player's chute sits along the back wall, in join order. Chutes
+ * gather toward the middle (within the win tray's width), not out by the side
+ * walls, so everyone can aim left and right. A big table spreads out only as
+ * far as it needs to keep the troughs apart. Coins that fall into the tray
+ * are credited to the nearest chute.
  */
 export function chuteX(index: number, count: number): number {
-  const span = TABLE.halfWidth * 0.8;
   if (count <= 1) return 0;
+  const span = Math.min(TABLE.halfWidth * 0.8, Math.max(TABLE.trayHalfWidth * 0.6, ((count - 1) * CHUTE_MIN_GAP) / 2));
   return -span + (2 * span * index) / (count - 1);
 }
 

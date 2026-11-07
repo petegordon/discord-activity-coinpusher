@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { START_PILE, TABLE } from "../src/game/rules";
+import { chuteX, START_PILE, TABLE } from "../src/game/rules";
 import { KIND_COIN, packBodies, unpackBodies } from "../src/sim/frame";
 import { DozerSim, loadRapier, pusherAt } from "../src/sim/world";
 
@@ -12,7 +12,8 @@ const run = (s: DozerSim, seconds: number) => {
   for (let t = 0; t < seconds; t += 1 / 60) s.step(1 / 60);
 };
 
-describe("DozerSim", () => {
+// Real Rapier physics: a few of these run many simulated seconds, close to the 5 s default on a busy machine.
+describe("DozerSim", { timeout: 20_000 }, () => {
   it("starts with a settled pile, a four-prize tower, and nothing counted", () => {
     const t0 = performance.now();
     sim.reset(42);
@@ -66,6 +67,30 @@ describe("DozerSim", () => {
     expect(outs).toBeGreaterThan(5);
     expect(tray).toBeGreaterThan(0);
   });
+
+  it("from every chute, a full left or right aim lands on the shelf, not straight in a gutter", () => {
+    // Every chute position a table of 2, 3 or 4 uses.
+    const xs = [...new Set([2, 3, 4].flatMap((n) => Array.from({ length: n }, (_, i) => chuteX(i, n).toFixed(4))))].map(Number);
+    let landed = 0;
+    const lost: string[] = [];
+    sim.reset(11);
+    sim.locked = true; // the pusher still, so only the throw decides
+    for (const x of xs) {
+      for (const side of [-1, 1]) {
+        for (const power of [0, 0.5, 1]) {
+          const id = sim.drop(x, side * TABLE.maxAim, power, 0);
+          run(sim, 1.2);
+          const coin = sim.all().find((b) => b.id === id);
+          if (coin && Math.abs(coin.p[0]) < TABLE.halfWidth && coin.p[2] < TABLE.frontZ) landed++;
+          else lost.push(`x ${x} aim ${side > 0 ? "right" : "left"} power ${power}`);
+        }
+      }
+    }
+    sim.locked = false;
+    sim.takeOuts();
+    console.log(`full-aim drops from ${xs.length} chute positions: ${landed} landed on the shelf, ${lost.length} went straight off ${lost.join("; ")}`);
+    expect(lost).toEqual([]);
+  }, 60_000);
 
   it("a shake rocks the prizes but doesn't sweep the coins off", () => {
     let moved = 0;

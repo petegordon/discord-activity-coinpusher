@@ -387,15 +387,15 @@ export class DozerScene {
         const rim = new THREE.MeshStandardMaterial({ color: "#ffe3a0", metalness: 1, roughness: 0.25 });
         // An open trough tipped toward the shelf, with gold rails.
         const trough = new THREE.Group();
-        const base = new THREE.Mesh(new THREE.BoxGeometry(0.064, 0.005, 0.085), mat);
+        const base = new THREE.Mesh(new THREE.BoxGeometry(TABLE.chuteWidth, 0.005, 0.085), mat);
         trough.add(base);
         for (const s of [-1, 1]) {
           const side = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.024, 0.085), mat);
-          side.position.set(s * 0.032, 0.012, 0);
+          side.position.set((s * TABLE.chuteWidth) / 2, 0.012, 0);
           trough.add(side);
           const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.088, 8), rim);
           rail.rotation.x = Math.PI / 2;
-          rail.position.set(s * 0.032, 0.025, 0);
+          rail.position.set((s * TABLE.chuteWidth) / 2, 0.025, 0);
           trough.add(rail);
         }
         trough.rotation.x = 0.35;

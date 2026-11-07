@@ -59,6 +59,20 @@ describe("chutes and lanes", () => {
     for (const x of xs) expect(Math.abs(x)).toBeLessThan(TABLE.halfWidth);
   });
 
+  it("gathers chutes toward the middle, inside the win tray, for up to four players", () => {
+    for (const n of [2, 3, 4]) {
+      for (let i = 0; i < n; i++) expect(Math.abs(chuteX(i, n))).toBeLessThanOrEqual(TABLE.trayHalfWidth * 0.6 + 1e-9);
+    }
+    expect(chuteX(0, 2)).toBeCloseTo(-0.126);
+  });
+
+  it("never lets troughs overlap, even at a full table of eight", () => {
+    for (let n = 2; n <= 8; n++) {
+      for (let i = 1; i < n; i++) expect(chuteX(i, n) - chuteX(i - 1, n)).toBeGreaterThan(TABLE.chuteWidth);
+      expect(Math.abs(chuteX(0, n)) + TABLE.chuteWidth / 2).toBeLessThan(TABLE.halfWidth);
+    }
+  });
+
   it("credits the tray to the nearest chute", () => {
     expect(laneAt(-0.2, 2)).toBe(0);
     expect(laneAt(0.2, 2)).toBe(1);

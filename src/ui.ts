@@ -35,7 +35,13 @@ export type UIHandlers = {
   remoteOpenHere: () => void;
   remoteNewLink: () => void;
   remoteUnpair: () => void;
+  /** Standalone web: sign in with Discord through House Tandem / sign out. */
+  signIn: () => void;
+  signOut: () => void;
 };
+
+/** The lobby's account line on the standalone web version. */
+export type AccountView = { signedIn: false } | { signedIn: true; name: string; avatar?: string };
 
 /** The pairing sheet's contents. See PHONE-REMOTE.md. */
 export type PairView = {
@@ -95,6 +101,9 @@ export class UI {
     $("remote-btn").addEventListener("click", () => handlers.openRemote());
     $("use-phone").addEventListener("click", () => handlers.openRemote());
     $("lobby-phone").addEventListener("click", () => handlers.openRemote());
+    $("ht-signin").addEventListener("click", () => handlers.signIn());
+    $("ht-signout").addEventListener("click", () => handlers.signOut());
+    document.getElementById("name-signin")?.addEventListener("click", () => handlers.signIn());
     $("pair-open").addEventListener("click", () => handlers.remoteOpenHere());
     $("pair-new").addEventListener("click", () => handlers.remoteNewLink());
     $("pair-unpair").addEventListener("click", () => handlers.remoteUnpair());
@@ -128,6 +137,29 @@ export class UI {
    * to undo typing in any text field still in the document, which pops up
    * when a player flicks or shakes their phone.
    */
+  /** Standalone web only: who's signed in, or the button to sign in. */
+  showAccount(v: AccountView | null) {
+    const box = $("ht-account");
+    box.hidden = !v;
+    if (!v) return;
+    const text = $("ht-account-text");
+    text.replaceChildren();
+    if (v.signedIn) {
+      if (v.avatar) {
+        const img = document.createElement("img");
+        img.src = v.avatar;
+        img.alt = "";
+        img.referrerPolicy = "no-referrer";
+        text.append(img, " ");
+      }
+      text.append(`Signed in as ${v.name}`);
+    } else {
+      text.textContent = "Play as your House Tandem account";
+    }
+    $("ht-signin").hidden = v.signedIn;
+    $("ht-signout").hidden = !v.signedIn;
+  }
+
   removeNamePrompt() {
     const input = document.getElementById("name-input");
     if (input === document.activeElement) (input as HTMLInputElement).blur();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FRAME_MS, HostAuthority, sanitizeName } from "../src/game/host";
-import { DROP_COOLDOWN_MS, END_QUIET_MS, SOLO_SHAKE, SYNC_SHAKE, SYNC_WINDOW_MS, TILT_LOCK_MS } from "../src/game/rules";
+import { DROP_COOLDOWN_MS, END_QUIET_MS, SOLO_SHAKE, SYNC_SHAKE, SYNC_WINDOW_MS, TABLE, TILT_LOCK_MS } from "../src/game/rules";
 import type { Msg } from "../src/net/protocol";
 import { KIND_COIN, KIND_PRIZE } from "../src/sim/frame";
 import { FakeSim } from "./fakes";
@@ -43,7 +43,7 @@ describe("HostAuthority", () => {
     host.handle("b", { t: "drop", aim: 9, power: 0.8, spin: -5 });
     expect(sim.drops[0]).toMatchObject({ power: 0.8, spin: -1 });
     expect(sim.drops[0].x).toBeGreaterThan(0); // b's chute is on the right
-    expect(sim.drops[0].aim).toBeCloseTo(Math.PI / 6);
+    expect(sim.drops[0].aim).toBeCloseTo(TABLE.maxAim);
     expect(host.game.coins.b).toBe(29);
     // Too soon, then fine.
     expect(host.handle("b", { t: "drop", aim: 0, power: 0.5, spin: 0 })).toEqual([]);

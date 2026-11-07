@@ -13,6 +13,7 @@ import type { Transport } from "./net/transport";
 import { startDiscord, type DiscordSession } from "./platform/discord";
 import { apiBase, debug, inDiscord, transportChoice } from "./platform/env";
 import { inviteLink, standaloneRoom, storedName, storeName } from "./platform/identity";
+import { beginSignIn, signOut, webSession, type HtSession } from "./platform/houseTandem";
 import { remoteLink } from "./remote/link";
 import { DozerScene } from "./render/scene";
 import type { Frame } from "./sim/frame";
@@ -58,6 +59,13 @@ async function boot() {
       remoteOpenHere: () => {
         if (remote) void discord?.openExternal(remoteLink(roomId, transportKind, remote.key)).catch(() => {});
       },
+      signIn: () => {
+        beginSignIn().catch((e: Error) => ui.hint(e.message));
+      },
+      signOut: () => {
+        signOut();
+        location.reload();
+      },
     },
     audio.muted,
   );
@@ -71,6 +79,7 @@ async function boot() {
 
   // ---- identity & room ----
   let self: Self;
+  let ht: HtSession | null = null;
   if (inDiscord) {
     try {
       discord = await startDiscord();
@@ -81,7 +90,9 @@ async function boot() {
     }
   } else {
     roomId = standaloneRoom();
-    let name = storedName();
+    // Signed in with House Tandem (relay rooms only): play as that account.
+    ht = transportKind === "relay" ? await webSession() : null;
+    let name = ht ? ht.user.name : storedName();
     if (!name) {
       name = await ui.askName("");
       storeName(name);
@@ -93,7 +104,8 @@ async function boot() {
         return;
       }
     }
-    self = { ...(await newIdentity()), name };
+    self = { ...(await newIdentity()), name, avatarUrl: ht?.user.avatar };
+    if (transportKind === "relay") ui.showAccount(ht ? { signedIn: true, name: ht.user.name, avatar: ht.user.avatar } : { signedIn: false });
   }
   ui.removeNamePrompt(); // no-op if already gone
   ui.setRoom(roomId, !inDiscord);
@@ -103,7 +115,7 @@ async function boot() {
   ui.status({ kind: "connecting" });
   const transport: Transport =
     transportKind === "relay"
-      ? new RelayTransport(roomId, self.id, self.key, apiBase, { ticket: self.ticket })
+      ? new RelayTransport(roomId, self.id, self.key, apiBase, { ticket: self.ticket, ht: ht?.token })
       : new PeerJsTransport(roomId, self.id, self.key, await peerOptions());
   room = new Room(transport, self);
   const r = room;

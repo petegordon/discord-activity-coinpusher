@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addPlayer, createGame, startGame } from "../src/game/dozer";
+import { TABLE } from "../src/game/rules";
 import { FakeSim, FakeTransport } from "./fakes";
 import type { Envelope, Msg, Target } from "../src/net/protocol";
 import { RelayTransport } from "../src/net/relay";
@@ -61,7 +62,7 @@ describe("Room as host", () => {
     room.on("aim", (p, a) => aims.push([p, a]));
     t.events.emit("message", env("a", { t: "aim", aim: 1e6 }, "all"));
     t.events.emit("message", env("zz", { t: "aim", aim: 0.1 }, "all"));
-    expect(aims).toEqual([["a", Math.PI / 6]]);
+    expect(aims).toEqual([["a", TABLE.maxAim]]);
     room.leave();
   });
 

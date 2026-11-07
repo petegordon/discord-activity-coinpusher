@@ -66,7 +66,7 @@ export class Room {
   ) {
     transport.on("message", (env) => this.onMessage(env));
     transport.on("host-change", (isHost) => this.onHostChange(isHost));
-    transport.on("peers", (ids) => this.onPeers(ids));
+    transport.on("peers", (ids, accounts) => this.onPeers(ids, accounts));
     transport.on("status", (s) => this.events.emit("status", s));
     if ("successionDelay" in transport) {
       (transport as { successionDelay: () => number }).successionDelay = () => this.successionDelay();
@@ -227,10 +227,11 @@ export class Room {
   }
 
   /** Host only: who is connected right now (players and remotes). Absent players are dropped after the grace period. */
-  private onPeers(ids: string[]) {
+  private onPeers(ids: string[], accounts?: Record<string, string>) {
     if (!this.authority) return;
     const present = new Set(ids);
     this.broadcast(this.authority.remotesOnline(present));
+    if (accounts) this.broadcast(this.authority.setAccounts(accounts));
     const t = this.now();
     for (const p of this.authority.players) {
       if (p.id === this.self.id || present.has(p.id)) this.missingSince.delete(p.id);

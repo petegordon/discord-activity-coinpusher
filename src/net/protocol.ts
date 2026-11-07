@@ -11,6 +11,12 @@ export type Player = {
   remoteId?: string;
   /** Whether that phone is connected right now. */
   remoteOnline?: boolean;
+  /**
+   * The player's House Tandem account, when signed in. Verified by the relay
+   * (from the Discord ticket or the web session) and passed to the host in the
+   * peers message; never taken from what the player sends.
+   */
+  accountId?: string;
 };
 
 export type Msg =

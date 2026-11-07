@@ -10,7 +10,19 @@ export type RelayOptions = {
   role?: Role;
   /** Required for players in Discord rooms (worker/src/roomTicket.ts). */
   ticket?: string;
+  /** A House Tandem session (web sign-in); the relay checks it and tells the host which account this player is. */
+  ht?: string;
 };
+
+/** player id → House Tandem account id, as the relay sent it (only well-formed entries). */
+function accountMap(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (/^[0-9a-f]{16}$/.test(k) && typeof v === "string" && /^[0-9]{1,20}$/.test(v)) out[k] = v;
+  }
+  return out;
+}
 
 /**
  * WebSocket transport through a Cloudflare Durable Object (worker/src/index.ts).
@@ -53,6 +65,7 @@ export class RelayTransport implements Transport {
     base.searchParams.set("key", this.key);
     if (this.options.role === "remote") base.searchParams.set("role", "remote");
     if (this.options.ticket) base.searchParams.set("ticket", this.options.ticket);
+    if (this.options.ht) base.searchParams.set("ht", this.options.ht);
     return base.toString();
   }
 
@@ -77,10 +90,10 @@ export class RelayTransport implements Transport {
       } catch {
         return;
       }
-      const d = data as { type?: string; ids?: unknown; remotes?: unknown; env?: unknown };
+      const d = data as { type?: string; ids?: unknown; remotes?: unknown; env?: unknown; accounts?: unknown };
       if (d.type === "peers" && Array.isArray(d.ids)) {
         const strings = (xs: unknown) => (Array.isArray(xs) ? xs.filter((x): x is string => typeof x === "string") : []);
-        this.onPeers(strings(d.ids), strings(d.remotes));
+        this.onPeers(strings(d.ids), strings(d.remotes), accountMap(d.accounts));
         if (!this.connectedOnce) {
           this.connectedOnce = true;
           resolve?.();
@@ -106,7 +119,7 @@ export class RelayTransport implements Transport {
   }
 
   /** `ids` are players in connection order (the first is host); `remotes` are phone remotes. */
-  private onPeers(ids: string[], remotes: string[]) {
+  private onPeers(ids: string[], remotes: string[], accounts: Record<string, string> = {}) {
     const hostId = ids[0] ?? null;
     const isHost = hostId === this.selfId;
     // After a reconnect the host may well be unchanged, but it may have dropped
@@ -116,7 +129,7 @@ export class RelayTransport implements Transport {
     this.hostId = hostId;
     this.isHost = isHost;
     if (changed) this.events.emit("host-change", isHost);
-    if (isHost) this.events.emit("peers", [...ids, ...remotes]);
+    if (isHost) this.events.emit("peers", [...ids, ...remotes], accounts);
   }
 
   send(msg: Msg, to: Target) {

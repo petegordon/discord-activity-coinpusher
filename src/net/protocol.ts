@@ -44,6 +44,14 @@ export type Msg =
 export type Target = "host" | "all";
 
 /**
+ * Client → the relay itself (`{ to: "server", msg }`), never relayed to anyone.
+ * playtime: `s` more seconds of active play since this socket last reported
+ * (time in game, housetandem-web #37). The relay credits the socket's VERIFIED
+ * House Tandem account; guests and phone remotes are ignored (worker/src/playtime.ts).
+ */
+export type ServerMsg = { t: "playtime"; s: number };
+
+/**
  * `remote` is set by the relay or the PeerJS host when the sender connected
  * as a phone remote. It is never taken from the sender.
  */

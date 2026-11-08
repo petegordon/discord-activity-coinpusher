@@ -1,4 +1,12 @@
-export type Attachment = { id: string; joinedAt: number; lastAim?: number; role?: "player" | "remote"; userId?: string };
+export type Attachment = {
+  id: string;
+  joinedAt: number;
+  lastAim?: number;
+  role?: "player" | "remote";
+  userId?: string;
+  /** When this socket last reported time in game (worker/src/playtime.ts). */
+  lastPlaytime?: number;
+};
 
 /**
  * Connection order decides the host: the earliest *player*. phone remotes

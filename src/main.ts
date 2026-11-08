@@ -15,10 +15,14 @@ import { startDiscord, type DiscordSession } from "./platform/discord";
 import { apiBase, debug, inDiscord, transportChoice } from "./platform/env";
 import { inviteLink, standaloneRoom, storedName, storeName } from "./platform/identity";
 import { beginSignIn, signOut, webSession, type HtSession } from "./platform/houseTandem";
+import { createPlaytime } from "./platform/playtime";
 import { remoteLink } from "./remote/link";
 import { DozerScene } from "./render/scene";
 import type { Frame } from "./sim/frame";
 import { UI } from "./ui";
+
+/** Time in game stops counting after this long with no input and no coin of ours (housetandem-web #37). */
+const PLAYTIME_IDLE_MS = 3 * 60_000;
 
 /** Don't re-send a pairing the host hasn't reflected yet more often than this. */
 const REPAIR_MS = 3_000;
@@ -121,6 +125,14 @@ async function boot() {
   room = new Room(transport, self);
   const r = room;
 
+  // Time in game for a signed-in House Tandem account, reported over the relay
+  // socket; the relay credits the account it verified, never one we name.
+  const signedIn = transportKind === "relay" && (!!ht || !!discord?.signedIn);
+  const playtime =
+    signedIn && transport instanceof RelayTransport
+      ? createPlaytime({ game: "coins", send: (s) => transport.toServer({ t: "playtime", s }), idleMs: PLAYTIME_IDLE_MS })
+      : null;
+
   let players: Player[] = [];
   let game: GameState = createGame();
   let locked = false;
@@ -220,6 +232,8 @@ async function boot() {
     const mine = game.order.indexOf(self.id);
     let wonHere = 0;
     for (const e of f.events) {
+      // Our own coins and shakes count as play, also when they come from our phone remote.
+      if ((e.k === "drop" && e.by === self.id) || (e.k === "shake" && e.by.includes(self.id))) playtime?.noteActivity();
       switch (e.k) {
         case "drop":
           if (e.by !== self.id) audio.clink(0.3);
@@ -310,6 +324,8 @@ async function boot() {
 
   if (debug) Object.assign(window, { dozer: { room: r, scene, self, controller } });
   (window as { __dozerLoaded?: () => void }).__dozerLoaded?.(); // see public/boot-guard.js
+  // Before the leave below, so the last seconds go out on the still-open socket.
+  playtime?.start();
   addEventListener("pagehide", () => r.leave());
 
   try {

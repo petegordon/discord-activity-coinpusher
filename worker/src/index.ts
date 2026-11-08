@@ -5,6 +5,7 @@ import { splitPeers, type Attachment } from "./peers";
 import { DISCORD_ROOM_RE, discordRoom, readRoomTicket, roomTicket } from "./roomTicket";
 import { RANGED_RE, withRanges } from "./ranges";
 import { Scorekeeper, type GamesService } from "./scorekeeper";
+import { recordPlaytime, type PlaytimeService } from "./playtime";
 import { ACHIEVEMENTS } from "../../src/achievements/defs";
 
 export interface Env {
@@ -21,9 +22,10 @@ export interface Env {
 
 /**
  * The House Tandem account service (Tandemonium's API Worker, entrypoint
- * HouseTandemGames): sign-in, plus gameProfile/recordGame for achievements.
+ * HouseTandemGames): sign-in, gameProfile/recordGame for achievements, and
+ * recordPlay for time in game (housetandem-web #37).
  */
-export type HouseTandem = GamesService & {
+export type HouseTandem = GamesService & PlaytimeService & {
   resolveDiscord(profile: { discordId: string; name: string; avatar?: string }): Promise<{ userId: number | string; name: string; avatar?: string }>;
   verifySession(token: string): Promise<{ userId: number | string; name: string; avatar?: string } | null>;
 };
@@ -286,9 +288,17 @@ export class RelayRoom extends DurableObject<Env> {
       return;
     }
     const { to, msg } = parsed;
-    if ((to !== "host" && to !== "all") || !msg || typeof msg.t !== "string") return;
-
+    if (!msg || typeof msg.t !== "string") return;
     const sender = ws.deserializeAttachment() as Attachment;
+    // For the relay itself, never relayed: time in game for the sender's verified account.
+    if (to === "server") {
+      if (msg.t === "playtime") {
+        const att = recordPlaytime(this.env.HT, sender, msg as { s?: unknown }, Date.now(), (p) => this.ctx.waitUntil(p), (...a) => console.warn(...a));
+        if (att) ws.serializeAttachment(att);
+      }
+      return;
+    }
+    if (to !== "host" && to !== "all") return;
     if (msg.t === THROTTLED) {
       const now = Date.now();
       if (now - (sender.lastAim ?? 0) < AIM_MIN_INTERVAL_MS) return;

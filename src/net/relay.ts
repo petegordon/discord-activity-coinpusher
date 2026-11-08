@@ -1,4 +1,4 @@
-import { isEnvelope, type Msg, type Role, type Target } from "./protocol";
+import { isEnvelope, type Msg, type Role, type ServerMsg, type Target } from "./protocol";
 import { Emitter, type Transport, type TransportEvents } from "./transport";
 
 /** Also how the relay spots a dead host: see STALE_MS in the Worker. */
@@ -135,6 +135,13 @@ export class RelayTransport implements Transport {
   send(msg: Msg, to: Target) {
     if (to === "host" && this.isHost) return;
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ to, msg }));
+  }
+
+  /** A message for the relay itself (never relayed). False if the socket isn't open. */
+  toServer(msg: ServerMsg): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify({ to: "server", msg }));
+    return true;
   }
 
   close() {

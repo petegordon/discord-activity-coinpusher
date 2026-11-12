@@ -13,7 +13,7 @@ Discord runs Activities in a cross-origin iframe that isn't delegated the `accel
 - **📱** (top right), **Play with your phone** in the lobby, or the button under the pad opens a sheet. The sheet has:
   - a QR code, made locally with `uqr`
   - the full link and **Copy link**
-  - **Open on this phone**, in Discord on a phone (`openExternalLink`)
+  - in Discord on a phone, a request for a **second phone or tablet** (an *Open on this phone* button was removed 2026-11-11: one phone can't be the table and the controller); dragging on the pad stays as the fallback
 - Once the phone connects, everyone sees a 📱 badge on your name and the sheet closes. The pad then says **PLAY WITH YOUR PHONE**.
 - **New link** revokes the old one. **Unpair** stops using the phone.
 

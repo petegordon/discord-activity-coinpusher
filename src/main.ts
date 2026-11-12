@@ -61,9 +61,6 @@ async function boot() {
         remote = null;
         ui.hidePair();
       },
-      remoteOpenHere: () => {
-        if (remote) void discord?.openExternal(remoteLink(roomId, transportKind, remote.key)).catch(() => {});
-      },
       signIn: () => {
         beginSignIn().catch((e: Error) => ui.hint(e.message));
       },
@@ -145,6 +142,10 @@ async function boot() {
   let remoteWasOnline = false;
 
   function remoteWhy() {
+    // On Discord mobile the same phone can't be the table and the controller (leaving Discord drops the table), so ask for a second device.
+    if (inDiscord && discord?.mobile) {
+      return "Discord doesn't let Activities read motion sensors. Scan this with a second phone or tablet to aim, flick and shake with it, or drag on the pad here.";
+    }
     if (controller?.motion === "blocked" && inDiscord) {
       return "Discord doesn't let Activities read motion sensors. Scan this with your phone's camera to aim, flick and shake with it.";
     }
@@ -159,7 +160,6 @@ async function boot() {
       link,
       qrSvg: renderSVG(link, { ecc: "M", border: 1 }),
       why: remoteWhy(),
-      canOpenHere: !!discord?.mobile,
       paired: me()?.remoteId === remote.id,
       online: remoteOnline(),
     });

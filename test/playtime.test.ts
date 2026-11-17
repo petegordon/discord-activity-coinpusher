@@ -4,7 +4,9 @@ import { createPlaytime } from "../src/platform/playtime";
 import type { Attachment } from "../worker/src/peers";
 import { MAX_PLAYTIME_S, PLAYTIME_GAME, PLAYTIME_MIN_INTERVAL_MS, recordPlaytime } from "../worker/src/playtime";
 
-const signedIn: Attachment = { id: "a".repeat(16), joinedAt: 1, role: "player", userId: "42" };
+const signedIn: Attachment = { id: "a".repeat(16), joinedAt: 1, role: "player", userId: "42", loginId: 5 };
+/** A socket from before logins were kept, or an account service that doesn't send one. */
+const noLogin: Attachment = { id: "c".repeat(16), joinedAt: 3, role: "player", userId: "42" };
 const guest: Attachment = { id: "b".repeat(16), joinedAt: 2, role: "player" };
 
 function fakeHt(impl?: () => Promise<unknown>) {
@@ -16,21 +18,30 @@ describe("relay: playtime reports", () => {
     const ht = fakeHt();
     const wait = vi.fn();
     const att = recordPlaytime(ht, signedIn, { s: 61.4 }, 10_000, wait);
-    expect(ht.recordPlay).toHaveBeenCalledWith("42", PLAYTIME_GAME, 61);
+    expect(ht.recordPlay).toHaveBeenCalledWith("42", PLAYTIME_GAME, 61, 5);
     expect(PLAYTIME_GAME).toBe("coins");
     expect(wait).toHaveBeenCalledOnce();
     expect(att).toEqual({ ...signedIn, lastPlaytime: 10_000 });
 
     recordPlaytime(ht, signedIn, { s: 99_999 }, 20_000);
-    expect(ht.recordPlay).toHaveBeenLastCalledWith("42", "coins", MAX_PLAYTIME_S);
+    expect(ht.recordPlay).toHaveBeenLastCalledWith("42", "coins", MAX_PLAYTIME_S, 5);
     recordPlaytime(ht, signedIn, { s: -5 }, 30_000);
-    expect(ht.recordPlay).toHaveBeenLastCalledWith("42", "coins", 1);
+    expect(ht.recordPlay).toHaveBeenLastCalledWith("42", "coins", 1, 5);
   });
 
-  it("ignores any user id in the message", () => {
+  it("ignores any user id or login id in the message", () => {
     const ht = fakeHt();
-    recordPlaytime(ht, signedIn, { s: 30, userId: "7" } as { s: number }, 10_000);
-    expect(ht.recordPlay).toHaveBeenCalledWith("42", "coins", 30);
+    recordPlaytime(ht, signedIn, { s: 30, userId: "7", loginId: 99 } as { s: number }, 10_000);
+    expect(ht.recordPlay).toHaveBeenCalledWith("42", "coins", 30, 5);
+  });
+
+  it("without a login id (older account service, or an older socket) it still reports, with null", () => {
+    const ht = fakeHt();
+    const att = recordPlaytime(ht, noLogin, { s: 30, loginId: 99 } as { s: number }, 10_000);
+    expect(ht.recordPlay).toHaveBeenCalledWith("42", "coins", 30, null);
+    expect(att).toEqual({ ...noLogin, lastPlaytime: 10_000 });
+    // The login stays on the socket across reports.
+    expect(recordPlaytime(fakeHt(), signedIn, { s: 30 }, 10_000)?.loginId).toBe(5);
   });
 
   it("doesn't count guests, phone remotes, junk, or a room without the account service", () => {

@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { verifyPlayerKey } from "../../src/net/identityKey";
 import { CLIENT_BROADCASTS, THROTTLED } from "../../src/net/protocol";
-import { splitPeers, type Attachment } from "./peers";
+import { loginIdOf, splitPeers, type Attachment } from "./peers";
 import { DISCORD_ROOM_RE, discordRoom, readRoomTicket, roomTicket } from "./roomTicket";
 import { RANGED_RE, withRanges } from "./ranges";
 import { Scorekeeper, type GamesService } from "./scorekeeper";
@@ -23,11 +23,13 @@ export interface Env {
 /**
  * The House Tandem account service (Tandemonium's API Worker, entrypoint
  * HouseTandemGames): sign-in, gameProfile/recordGame for achievements, and
- * recordPlay for time in game (housetandem-web #37).
+ * recordPlay for time in game (housetandem-web #37). `loginId` is which of the
+ * account's logins signed in; records carry it. An older service doesn't
+ * return it, and without it picks the account's first login.
  */
 export type HouseTandem = GamesService & PlaytimeService & {
-  resolveDiscord(profile: { discordId: string; name: string; avatar?: string }): Promise<{ userId: number | string; name: string; avatar?: string }>;
-  verifySession(token: string): Promise<{ userId: number | string; name: string; avatar?: string } | null>;
+  resolveDiscord(profile: { discordId: string; name: string; avatar?: string }): Promise<{ userId: number | string; loginId?: number | null; name: string; avatar?: string }>;
+  verifySession(token: string): Promise<{ userId: number | string; loginId?: number | null; name: string; avatar?: string } | null>;
 };
 
 const ROOM_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -37,6 +39,8 @@ const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_SOCKETS_PER_ROOM = 48;
 /** Set by this Worker (never by the client) for a verified House Tandem account. */
 const USER_HEADER = "x-ht-user";
+/** Likewise: which of the account's logins signed in, when the account service says. */
+const LOGIN_HEADER = "x-ht-login";
 /** Clients ping every 5s; a socket silent for this long is treated as dead (half-open TCP). */
 const STALE_MS = 16_000;
 /** Aims are cosmetic; relay at most one per this interval per socket. */
@@ -76,17 +80,23 @@ export default {
       // Players in a Discord room need the ticket from /api/token. Remotes don't: the host ignores any remote nobody paired.
       const role = url.searchParams.get("role") === "remote" ? "remote" : "player";
       let userId: string | undefined;
+      let loginId: number | null = null;
       if (role === "player" && DISCORD_ROOM_RE.test(room)) {
         const t = env.DISCORD_CLIENT_SECRET ? await readRoomTicket(env.DISCORD_CLIENT_SECRET, room, id, url.searchParams.get("ticket")) : { ok: false };
         if (!t.ok) return json({ error: "bad ticket" }, 403);
         userId = t.userId;
+        loginId = t.loginId ?? null;
       } else if (role === "player" && url.searchParams.get("ht")) {
-        userId = await verifyWebSession(env, url.searchParams.get("ht")!);
+        const user = await verifyWebSession(env, url.searchParams.get("ht")!);
+        userId = user?.userId;
+        loginId = user?.loginId ?? null;
       }
       if (req.headers.get("Upgrade")?.toLowerCase() !== "websocket") return json({ error: "expected websocket" }, 426);
       const headers = new Headers(req.headers);
       headers.delete(USER_HEADER);
+      headers.delete(LOGIN_HEADER);
       if (userId) headers.set(USER_HEADER, userId);
+      if (userId && loginId !== null) headers.set(LOGIN_HEADER, String(loginId));
       return env.RELAY.get(env.RELAY.idFromName(room)).fetch(new Request(req, { headers }));
     }
 
@@ -96,12 +106,15 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+/** A signed-in player: the account, and the login that signed in (null when the account service doesn't say). */
+type Verified = { userId: string; loginId: number | null };
+
 /** A House Tandem web session, checked by the account service. Undefined = guest. */
-async function verifyWebSession(env: Env, token: string): Promise<string | undefined> {
+async function verifyWebSession(env: Env, token: string): Promise<Verified | undefined> {
   if (!env.HT || token.length > 4096) return undefined;
   try {
     const user = await env.HT.verifySession(token);
-    return user ? String(user.userId) : undefined;
+    return user ? { userId: String(user.userId), loginId: loginIdOf(user.loginId) } : undefined;
   } catch {
     return undefined;
   }
@@ -111,7 +124,7 @@ async function verifyWebSession(env: Env, token: string): Promise<string | undef
  * Who this access token belongs to (verified with Discord, not taken from the
  * client), and their House Tandem account. Undefined if either is unavailable.
  */
-async function houseTandemAccount(env: Env, accessToken: string): Promise<string | undefined> {
+async function houseTandemAccount(env: Env, accessToken: string): Promise<Verified | undefined> {
   if (!env.HT) return undefined;
   try {
     const res = await fetch("https://discord.com/api/users/@me", { headers: { authorization: `Bearer ${accessToken}` } });
@@ -123,7 +136,7 @@ async function houseTandemAccount(env: Env, accessToken: string): Promise<string
       : `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(me.id) >> 22n) % 6n)}.png`;
     const account = await env.HT.resolveDiscord({ discordId: me.id, name: me.global_name || me.username || "Player", avatar });
     const userId = String(account.userId);
-    return /^[0-9]{1,20}$/.test(userId) ? userId : undefined;
+    return /^[0-9]{1,20}$/.test(userId) ? { userId, loginId: loginIdOf(account.loginId) } : undefined;
   } catch {
     return undefined;
   }
@@ -163,8 +176,8 @@ async function exchangeToken(req: Request, env: Env): Promise<Response> {
     return json({ access_token });
   }
   const room = await discordRoom(env.DISCORD_CLIENT_SECRET, instanceId);
-  const userId = await houseTandemAccount(env, access_token);
-  return json({ access_token, room, ticket: await roomTicket(env.DISCORD_CLIENT_SECRET, room, playerId, userId), signedIn: !!userId });
+  const account = await houseTandemAccount(env, access_token);
+  return json({ access_token, room, ticket: await roomTicket(env.DISCORD_CLIENT_SECRET, room, playerId, account?.userId, account?.loginId), signedIn: !!account });
 }
 
 /**
@@ -242,7 +255,11 @@ export class RelayRoom extends DurableObject<Env> {
     if (!sk) return;
     const now = Date.now();
     const players = splitPeers(ordered).players;
-    sk.seat(players[0]?.att.id ?? null, new Map(players.filter((s) => s.att.userId).map((s) => [s.att.id, s.att.userId!])));
+    sk.seat(
+      players[0]?.att.id ?? null,
+      new Map(players.filter((s) => s.att.userId).map((s) => [s.att.id, s.att.userId!])),
+      new Map(players.filter((s) => s.att.userId && s.att.loginId != null).map((s) => [s.att.id, s.att.loginId!])),
+    );
     if (to === "host" && ws !== hostWs && (msg.t === "drop" || msg.t === "shake")) {
       const playerId = sender.role === "remote" ? this.remoteOwner.get(sender.id) : sender.id;
       if (playerId) sk.request(playerId, msg as { t: string; aim?: unknown }, sender.role === "remote", now);
@@ -267,6 +284,7 @@ export class RelayRoom extends DurableObject<Env> {
     const id = url.searchParams.get("id")!;
     const role = url.searchParams.get("role") === "remote" ? "remote" : "player";
     const userId = role === "player" ? (req.headers.get(USER_HEADER) ?? undefined) : undefined;
+    const loginId = userId ? loginIdOf(req.headers.get(LOGIN_HEADER)) : null;
     // A reconnecting player replaces their old socket.
     for (const ws of this.ctx.getWebSockets(id)) ws.close(4000, "replaced");
     if (this.sockets().length >= MAX_SOCKETS_PER_ROOM) return json({ error: "room full" }, 429);
@@ -274,7 +292,7 @@ export class RelayRoom extends DurableObject<Env> {
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, [id]);
     const joinedAt = Math.max(Date.now(), ...this.sockets().map((s) => s.att.joinedAt + 1));
-    server.serializeAttachment({ id, joinedAt, role, ...(userId ? { userId } : {}) } satisfies Attachment);
+    server.serializeAttachment({ id, joinedAt, role, ...(userId ? { userId } : {}), ...(loginId !== null ? { loginId } : {}) } satisfies Attachment);
     this.broadcastPeers();
     return new Response(null, { status: 101, webSocket: client });
   }

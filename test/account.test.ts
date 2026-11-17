@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { HostAuthority } from "../src/game/host";
 import { Room } from "../src/net/room";
+import { loginIdOf } from "../worker/src/peers";
 import { readRoomTicket, roomTicket } from "../worker/src/roomTicket";
 import { FakeSim, FakeTransport } from "./fakes";
 
@@ -16,6 +17,25 @@ describe("room tickets name the House Tandem account", () => {
     const guest = await roomTicket("secret", "dabc", "p1");
     expect(await readRoomTicket("secret", "dabc", "p1", guest)).toEqual({ ok: true });
     expect(await readRoomTicket("secret", "dabc", "p1", "nope")).toEqual({ ok: false });
+  });
+
+  it("a ticket names the login too when there is one; a swapped login fails; without one it's the older ticket", async () => {
+    const t = await roomTicket("secret", "dabc", "p1", "42", 7);
+    expect(t).toMatch(/^42\.7\.[0-9a-f]{32}$/);
+    expect(await readRoomTicket("secret", "dabc", "p1", t)).toEqual({ ok: true, userId: "42", loginId: 7 });
+    expect(await readRoomTicket("secret", "dabc", "p1", t.replace(/^42\.7\./, "42.8."))).toEqual({ ok: false });
+    expect(await readRoomTicket("secret", "dabc", "p1", t.replace(/^42\.7\./, "43.7."))).toEqual({ ok: false });
+    expect(await readRoomTicket("secret", "dabc", "p1", t.replace(/^42\.7\./, "42."))).toEqual({ ok: false }); // can't be passed off as an older ticket
+    const plain = await roomTicket("secret", "dabc", "p1", "42");
+    expect(await roomTicket("secret", "dabc", "p1", "42", null)).toBe(plain);
+    expect(await roomTicket("secret", "dabc", "p1", "42", undefined)).toBe(plain);
+    expect(await readRoomTicket("secret", "dabc", "p1", plain.replace(/^42\./, "42.7."))).toEqual({ ok: false }); // nor a login added to one
+  });
+
+  it("reads a login id only from an integer (an older service sends none)", () => {
+    expect(loginIdOf(7)).toBe(7);
+    expect(loginIdOf("7")).toBe(7);
+    for (const v of [undefined, null, "", "x", "7x", 1.5, -1, Number.NaN, {}, true]) expect(loginIdOf(v)).toBeNull();
   });
 });
 

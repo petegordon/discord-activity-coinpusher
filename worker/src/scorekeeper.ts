@@ -21,7 +21,7 @@ export const FLUSH_EARNED_MS = 800;
 /** The account service's achievement calls (Tandemonium's HouseTandemGames entrypoint). */
 export type GamesService = {
   gameProfile(userId: string, game: string): Promise<{ earned: string[]; stats: Record<string, unknown> }>;
-  recordGame(userId: string, game: string, delta: Delta, earned: string[]): Promise<{ newlyEarned: string[] }>;
+  recordGame(userId: string, game: string, delta: Delta, earned: string[], loginId?: number | null): Promise<{ newlyEarned: string[] }>;
 };
 
 export type ScorekeeperDeps = {
@@ -39,7 +39,7 @@ type Account = {
   earned: Set<string>;
   loading: Promise<void>;
   /** Not saved yet. */
-  pending: { playerId: string; delta: Delta; earned: Set<string> } | null;
+  pending: { playerId: string; loginId: number | null; delta: Delta; earned: Set<string> } | null;
   lastFlush: number;
   saving: boolean;
 };
@@ -53,13 +53,16 @@ type Account = {
 export class Scorekeeper {
   readonly referee = new Referee();
   private byUser = new Map<string, Account>();
+  /** player id → the login they signed in with, when the account service says. */
+  private logins = new Map<string, number>();
 
   constructor(private readonly deps: ScorekeeperDeps) {}
 
   /** The relay's view: who's host, and which players are signed in (verified sockets only). */
-  seat(hostId: string | null, accounts: Map<string, string>) {
+  seat(hostId: string | null, accounts: Map<string, string>, logins: Map<string, number> = new Map()) {
     this.referee.hostId = hostId;
     this.referee.accounts = accounts;
+    this.logins = logins;
   }
 
   request(playerId: string, msg: { t: string; aim?: unknown }, phone: boolean, now: number) {
@@ -104,8 +107,10 @@ export class Scorekeeper {
       if (!userId) continue; // guests earn nothing
       const acc = this.account(userId);
       acc.session = applyDelta(acc.session, c.delta);
-      const p = (acc.pending ??= { playerId: c.playerId, delta: {}, earned: new Set() });
+      const loginId = this.logins.get(c.playerId) ?? null;
+      const p = (acc.pending ??= { playerId: c.playerId, loginId, delta: {}, earned: new Set() });
       p.playerId = c.playerId;
+      p.loginId = loginId;
       p.delta = mergeDeltas(p.delta, c.delta);
       for (const id of c.earned) p.earned.add(id);
       touched.add(userId);
@@ -134,14 +139,14 @@ export class Scorekeeper {
       const hasDelta = Object.keys(p.delta).length > 0;
       if (!claim.length && !hasDelta) return;
       try {
-        const res = await ht.recordGame(userId, GAME, p.delta, claim);
+        const res = await ht.recordGame(userId, GAME, p.delta, claim, p.loginId);
         const fresh = (res?.newlyEarned ?? []).filter((x) => typeof x === "string");
         if (fresh.length) this.deps.toast(p.playerId, fresh);
       } catch (e) {
         for (const id of claim) acc.earned.delete(id);
         // Keep the progress for the next save.
         acc.pending = acc.pending
-          ? { playerId: acc.pending.playerId, delta: mergeDeltas(p.delta, acc.pending.delta), earned: new Set([...p.earned, ...acc.pending.earned]) }
+          ? { playerId: acc.pending.playerId, loginId: acc.pending.loginId, delta: mergeDeltas(p.delta, acc.pending.delta), earned: new Set([...p.earned, ...acc.pending.earned]) }
           : p;
         this.deps.log?.("recordGame failed", e);
       } finally {

@@ -9,14 +9,14 @@ export const PLAYTIME_MIN_INTERVAL_MS = 2_000;
 
 /** The account service's time-in-game call (Tandemonium's HouseTandemGames entrypoint, housetandem-web #37). */
 export type PlaytimeService = {
-  recordPlay(userId: string, game: string, seconds: number): Promise<unknown>;
+  recordPlay(userId: string, game: string, seconds: number, loginId?: number | null): Promise<unknown>;
 };
 
 /**
  * A `{ to: "server", msg: { t: "playtime", s } }` from a socket: credit `s`
  * active seconds (a delta since that client's last report) to the socket's
- * VERIFIED House Tandem account. The account comes from the attachment the
- * Worker set from the Discord ticket / web session, never from the message.
+ * VERIFIED House Tandem account, under the login that signed in. Both come from
+ * the attachment the Worker set from the Discord ticket / web session, never from the message.
  * Guests and phone remotes aren't counted. The server caps each delta to real
  * time, so a lying client can't add more than the time it's actually been here.
  *
@@ -37,7 +37,7 @@ export function recordPlaytime(
   const seconds = Math.min(MAX_PLAYTIME_S, Math.max(1, Math.round(msg.s)));
   let work: Promise<unknown>;
   try {
-    work = Promise.resolve(ht.recordPlay(sender.userId, PLAYTIME_GAME, seconds)).catch((e) => log?.("recordPlay failed", e));
+    work = Promise.resolve(ht.recordPlay(sender.userId, PLAYTIME_GAME, seconds, sender.loginId ?? null)).catch((e) => log?.("recordPlay failed", e));
   } catch (e) {
     log?.("recordPlay failed", e);
     work = Promise.resolve();

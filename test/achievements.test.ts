@@ -165,13 +165,13 @@ describe("referee: game end", () => {
 
 describe("scorekeeper: saving to House Tandem", () => {
   function setup(profile: { earned: string[]; stats: Record<string, unknown> } = { earned: [], stats: {} }) {
-    const recorded: { userId: string; game: string; delta: unknown; earned: string[] }[] = [];
+    const recorded: { userId: string; game: string; delta: unknown; earned: string[]; loginId: number | null | undefined }[] = [];
     const toasts: { playerId: string; ids: string[] }[] = [];
     const work: Promise<unknown>[] = [];
     const ht = {
       gameProfile: vi.fn(async () => profile),
-      recordGame: vi.fn(async (userId: string, game: string, delta: unknown, earned: string[]) => {
-        recorded.push({ userId, game, delta, earned });
+      recordGame: vi.fn(async (userId: string, game: string, delta: unknown, earned: string[], loginId?: number | null) => {
+        recorded.push({ userId, game, delta, earned, loginId });
         return { newlyEarned: earned };
       }),
     };
@@ -190,6 +190,44 @@ describe("scorekeeper: saving to House Tandem", () => {
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({ userId: "11", game: "coins", earned: ["first_drop"], delta: { add: { drops: 1, phoneDrops: 1 } } });
     expect(toasts).toEqual([{ playerId: "a", ids: ["first_drop"] }]);
+  });
+
+  it("saves under the login the player signed in with; without one (older account service) it passes null", async () => {
+    const { sk, recorded, toasts, settle } = setup();
+    sk.seat("h", new Map([["a", "11"], ["b", "22"]]), new Map([["a", 5]]));
+    sk.state(playing(["h", "a", "b"]), 0);
+    sk.request("a", { t: "drop", aim: 0, loginId: 99 } as never, false, 100); // nothing in a message sets it
+    sk.request("b", { t: "drop", aim: 0 }, false, 100);
+    sk.frame([{ k: "drop", by: "a" }, { k: "drop", by: "b" }], 150);
+    await settle();
+    expect(recorded.map((r) => [r.userId, r.loginId])).toEqual([
+      ["11", 5],
+      ["22", null],
+    ]);
+    expect(toasts.map((t) => t.playerId)).toEqual(["a", "b"]);
+  });
+
+  it("a save that failed is retried under the same login; seating without logins still works", async () => {
+    const { sk, ht, recorded, settle } = setup();
+    ht.recordGame.mockRejectedValueOnce(new Error("down"));
+    sk.seat("h", new Map([["a", "11"]]), new Map([["a", 5]]));
+    sk.state(playing(["h", "a"]), 0);
+    sk.request("a", { t: "drop", aim: 0 }, false, 100);
+    sk.frame([{ k: "drop", by: "a" }], 150);
+    await settle();
+    expect(recorded).toHaveLength(0);
+    sk.flushAll(10_000);
+    await settle();
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({ userId: "11", loginId: 5, earned: ["first_drop"] });
+
+    const older = setup();
+    older.sk.seat("h", new Map([["a", "11"]]));
+    older.sk.state(playing(["h", "a"]), 0);
+    older.sk.request("a", { t: "drop", aim: 0 }, false, 100);
+    older.sk.frame([{ k: "drop", by: "a" }], 150);
+    await older.settle();
+    expect(older.recorded[0]).toMatchObject({ userId: "11", loginId: null });
   });
 
   it("lifetime achievements use the stored stats; saves are spaced out", async () => {

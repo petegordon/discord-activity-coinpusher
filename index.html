@@ -85,7 +85,7 @@
           <button id="lobby-phone" class="secondary" type="button" hidden>📱 Play with your phone</button>
           <div id="ht-account" class="ht-account" hidden>
             <span id="ht-account-text"></span>
-            <button id="ht-signin" class="chip-btn ht-discord" type="button" hidden>Sign in with Discord</button>
+            <uf-signin id="ht-signin" providers="discord" size="sm" hidden></uf-signin>
             <button id="ht-signout" class="chip-btn" type="button" hidden>Sign out</button>
           </div>
           <p class="muted small">Play coins only. No real money, no real prizes.</p>
@@ -111,7 +111,7 @@
           <input id="name-input" maxlength="24" autocomplete="nickname" required />
           <button class="primary" type="submit">Step up</button>
           <p class="muted or">or</p>
-          <button id="name-signin" class="secondary ht-discord" type="button">Sign in with Discord</button>
+          <uf-signin id="name-signin" providers="discord" block></uf-signin>
           <p class="muted small">Signed in, you play as your House Tandem account.</p>
         </form>
       </section>

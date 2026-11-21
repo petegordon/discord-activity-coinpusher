@@ -2,6 +2,8 @@ import type { GameState } from "./game/dozer";
 import { COIN_OPTIONS, DEFAULT_COINS } from "./game/rules";
 import type { Player } from "./net/protocol";
 import type { TransportStatus } from "./net/transport";
+// Registers <uf-signin>, the shared House Tandem sign-in button (index.html uses it).
+import "@usersfirst/identity/elements/uf-signin";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -98,9 +100,10 @@ export class UI {
     $("remote-btn").addEventListener("click", () => handlers.openRemote());
     $("use-phone").addEventListener("click", () => handlers.openRemote());
     $("lobby-phone").addEventListener("click", () => handlers.openRemote());
-    $("ht-signin").addEventListener("click", () => handlers.signIn());
+    // <uf-signin> (the shared House Tandem button) says which sign-in was picked; Discord is the only one here.
+    $("ht-signin").addEventListener("uf-signin", () => handlers.signIn());
     $("ht-signout").addEventListener("click", () => handlers.signOut());
-    document.getElementById("name-signin")?.addEventListener("click", () => handlers.signIn());
+    document.getElementById("name-signin")?.addEventListener("uf-signin", () => handlers.signIn());
     $("pair-new").addEventListener("click", () => handlers.remoteNewLink());
     $("pair-unpair").addEventListener("click", () => handlers.remoteUnpair());
     $("pair-close").addEventListener("click", () => this.hidePair());

@@ -51,6 +51,17 @@ npm run preview       # build, then serve app + Worker + Durable Object at http:
 
 DeviceMotion, WebCrypto and WebRTC need **HTTPS**, so test on phones with the deployed site (or an HTTPS tunnel).
 
+### House Tandem sign-in (shared)
+
+The standalone web version signs players in with the shared `@usersfirst/identity` package (the session client and the `<uf-signin>` button). It is vendored, not installed: `src/vendor/identity/` is a byte-for-byte copy of `packages/identity/src` from the `tandemonium-controller-lab` repo, stamped in `IDENTITY_VERSION.json`. Don't edit it here. To update, check the lab out at the tag you want next to this repo (or point `CONTROLLER_LAB_DIR` at it), then:
+
+```bash
+npm run sync-identity    # copy + stamp
+npm run check:identity   # fail if the copy differs from the lab checkout
+```
+
+The app imports it as `@usersfirst/identity/…` (an alias in `vite.config.ts`); the types for what it uses are in `src/types/usersfirst-identity.d.ts`. This game's side of sign-in is `src/platform/houseTandem.ts`.
+
 ### End-to-end tests
 
 With `npm run preview` running:

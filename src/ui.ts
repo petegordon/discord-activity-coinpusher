@@ -355,7 +355,7 @@ export class UI {
     }
     box.hidden = false;
     if (s.kind === "connecting") box.textContent = "Connecting to the machine…";
-    else if (s.kind === "reconnecting") box.textContent = "Connection lost — reconnecting…";
+    else if (s.kind === "reconnecting" || s.kind === "unlinked") box.textContent = "Connection lost — reconnecting…";
     else {
       box.classList.add("error");
       box.append(s.reason);

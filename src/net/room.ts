@@ -1,4 +1,4 @@
-import { HostAuthority, type Carry, type Sim } from "../game/host";
+import { HostAuthority, sanitizeAvatar, type Carry, type Sim } from "../game/host";
 import { createGame, type GameState } from "../game/dozer";
 import { clampAim } from "../game/rules";
 import { readFrame, unpackBodies, type Body, type Frame } from "../sim/frame";
@@ -123,12 +123,17 @@ export class Room {
     this.request({ t: "shake" });
   }
 
-  /** Make `remoteId` our phone remote (replacing any other). */
-  pair(remoteId: string) {
+  /**
+   * Make `remoteId` our phone remote (replacing any other). `keyHash` is the hash of
+   * the key in its link: on the relay, only a remote presenting that key gets in.
+   */
+  pair(remoteId: string, keyHash?: string) {
+    if (keyHash) this.transport.registerRemote?.(keyHash);
     this.request({ t: "pair", remoteId });
   }
 
   unpair() {
+    this.transport.registerRemote?.(null);
     this.request({ t: "unpair" });
   }
 
@@ -153,10 +158,15 @@ export class Room {
 
   private apply(msg: Msg) {
     if (msg.t === "state") {
-      this.players = msg.players;
+      if (!Array.isArray(msg.players)) return;
+      // Pictures are shown as they arrive, so they are checked here too, not only by the host.
+      this.players = msg.players.map(({ avatarUrl, ...p }) => {
+        const clean = sanitizeAvatar(avatarUrl);
+        return clean ? { ...p, avatarUrl: clean } : p;
+      });
       this.game = msg.game;
       this.hostId = msg.hostId;
-      this.events.emit("state", msg.players, msg.game);
+      this.events.emit("state", this.players, msg.game);
     } else if (msg.t === "frame") {
       const f = readFrame(msg.f);
       if (!f) return;

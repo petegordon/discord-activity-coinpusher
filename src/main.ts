@@ -4,7 +4,7 @@ import { renderSVG } from "uqr";
 import { CoinAudio } from "./audio";
 import { createGame, type GameState } from "./game/dozer";
 import { CoinController } from "./input/controller";
-import { newIdentity } from "./net/identityKey";
+import { keyHash, newIdentity } from "./net/identityKey";
 import { PeerJsTransport } from "./net/peerjs";
 import { peerOptions } from "./net/peerOptions";
 import type { Player } from "./net/protocol";
@@ -35,7 +35,7 @@ async function boot() {
   let controller: CoinController | null = null;
   let discord: DiscordSession | null = null;
   /** Our phone remote's identity, once the 📱 sheet has been opened. */
-  let remote: { id: string; key: string; sentAt: number } | null = null;
+  let remote: { id: string; key: string; hash: string; sentAt: number } | null = null;
 
   const ui = new UI(
     {
@@ -117,7 +117,7 @@ async function boot() {
   ui.status({ kind: "connecting" });
   const transport: Transport =
     transportKind === "relay"
-      ? new RelayTransport(roomId, self.id, self.key, apiBase, { ticket: self.ticket, ht: ht?.token })
+      ? new RelayTransport(roomId, self.id, self.key, apiBase, { ticket: self.ticket, refreshTicket: discord?.refreshTicket, ht: ht?.token })
       : new PeerJsTransport(roomId, self.id, self.key, await peerOptions());
   room = new Room(transport, self);
   const r = room;
@@ -170,8 +170,9 @@ async function boot() {
     if (!room) return;
     if (fresh || !remote) {
       const { id, key } = await newIdentity();
-      remote = { id, key, sentAt: Date.now() };
-      room.pair(id);
+      const hash = await keyHash(key);
+      remote = { id, key, hash, sentAt: Date.now() };
+      room.pair(id, hash);
     }
     ui.openPair();
     paintPair();
@@ -182,7 +183,7 @@ async function boot() {
     const mine = me();
     if (!remote || !mine || mine.remoteId === remote.id || Date.now() - remote.sentAt < REPAIR_MS) return;
     remote.sentAt = Date.now();
-    r.pair(remote.id);
+    r.pair(remote.id, remote.hash);
   }
 
   function shake() {

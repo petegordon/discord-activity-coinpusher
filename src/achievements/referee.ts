@@ -1,5 +1,5 @@
 import type { GameState } from "../game/dozer";
-import { DROP_COOLDOWN_MS, PRIZE_POINTS, START_PILE, TABLE } from "../game/rules";
+import { COIN_OPTIONS, DROP_COOLDOWN_MS, PRIZE_POINTS, START_PILE, TABLE } from "../game/rules";
 import type { SimEvent } from "../sim/frame";
 
 /**
@@ -16,7 +16,7 @@ import type { SimEvent } from "../sim/frame";
  *   seconds old at most). That request also says whether it came from their
  *   phone (Phone Pusher) and how far it was aimed (Bank Shot), so the host
  *   can't make those up for them. The host's own drops never pass through the
- *   relay; they're capped at one per DROP_COOLDOWN_MS of game time.
+ *   relay; they're capped at one per DROP_COOLDOWN_MS of game time in the room.
  * - **Shakes.** A player in a shake counts only if they sent a shake request
  *   in the last moment (the host itself: at most one per shake cooldown).
  * - **Coins won.** Never more than the coins the shelf could ever hold (start
@@ -25,6 +25,8 @@ import type { SimEvent } from "../sim/frame";
  *   per tower, and a new tower no sooner than MIN_TOWER_GAP_MS after the last.
  * - **A game** counts only with enough counted drops and time.
  * - **Accounts** come from the relay's own verified sockets, never the host.
+ * - **Game ids** come from the host, so no cap is tied to one: the caps hold
+ *   for the life of the room (see the Referee class).
  *
  * What's left (a host crediting coins to the wrong lane, or hiding a tilt) can
  * only move a player's own bragging rights a little. Moving the physics onto
@@ -137,40 +139,72 @@ type Seat = {
   /** Drop requests seen by the relay, not yet matched to a drop event. */
   requests: Request[];
   lastShakeReq: number;
-  /** This game. */
+  /** On this shelf. */
   drops: number;
   fullAimDrops: number;
   bankShots: number;
   laneWon: number;
 };
 
+/**
+ * What the cabinet has done since the shelf was last laid out afresh. A new
+ * game lays out a new shelf, but the referee counts one at most every
+ * MIN_GAME_MS: a game id that follows sooner carries on with the same shelf.
+ */
+type Shelf = {
+  startedAt: number;
+  /** Coins each player starts with (one of COIN_OPTIONS). */
+  coinsEach: number;
+  /** Counted drops onto this shelf. */
+  drops: number;
+  /** Coins that left it, won or lost. */
+  out: number;
+  towers: number;
+  tiers: Set<number>;
+  towerWon: Set<number>;
+};
+
+/** What belongs to one game id: whether it counts as a game, its score, its tilt. */
 type Game = {
   id: string;
   startedAt: number;
-  coinsEach: number;
   drops: number;
-  hostDrops: number;
-  out: number;
-  towers: number;
-  lastTowerAt: number;
-  tiers: Set<number>;
-  towerWon: Set<number>;
   score: number;
   hadTilt: boolean;
-  /** Arrival times of recent counted won coins. */
-  wonTimes: number[];
-  hostLastShake: number;
-  /** The last shake's counted members, for crediting a tilt. */
-  lastShake: { at: number; by: string[] } | null;
-  /** Recent counted shake members, for checking a tilt was earned. */
-  shakeUnits: number[];
   ended: boolean;
 };
 
+/** Seats kept for players no longer in the order, at most. */
+const MAX_SEATS = 64;
+
+/**
+ * The caps above hold for as long as the room does. The game id comes from
+ * the host, so nothing that limits the host is tied to it: a new id starts a
+ * new game (its score, its tilt, whether it counts as a game) and nothing
+ * else. Per player, the request queues and shake proofs carry over; per room,
+ * the host's drop allowance, the coins-per-second and tower pacing, and the
+ * shake history do. The shelf's own limits (how many coins it can give up,
+ * each player's coins, each prize tier once per tower) start again only with
+ * a shelf the referee counts as new (see Shelf).
+ */
 export class Referee {
   private game: Game | null = null;
+  private shelf: Shelf | null = null;
   private order: string[] = [];
   private seats = new Map<string, Seat>();
+
+  /** The host's own drops, counted against the time games have been running in this room. */
+  private hostDrops = 0;
+  /** Milliseconds of games that are over (the running one is added from its start). */
+  private playedMs = 0;
+  private lastTowerAt = -Infinity;
+  /** Arrival times of recent counted won coins. */
+  private wonTimes: number[] = [];
+  private hostLastShake = -Infinity;
+  /** The last shake's counted members, for crediting a tilt. */
+  private lastShake: { at: number; by: string[] } | null = null;
+  /** Recent counted shake members, for checking a tilt was earned. */
+  private shakeUnits: number[] = [];
 
   /** The player whose browser runs the shelf (from the relay's connection order). */
   hostId: string | null = null;
@@ -179,7 +213,15 @@ export class Referee {
 
   private seat(id: string): Seat {
     let s = this.seats.get(id);
-    if (!s) this.seats.set(id, (s = { requests: [], lastShakeReq: -Infinity, drops: 0, fullAimDrops: 0, bankShots: 0, laneWon: 0 }));
+    if (!s) {
+      if (this.seats.size >= MAX_SEATS) {
+        for (const old of this.seats.keys()) {
+          if (this.seats.size < MAX_SEATS) break;
+          if (!this.order.includes(old)) this.seats.delete(old);
+        }
+      }
+      this.seats.set(id, (s = { requests: [], lastShakeReq: -Infinity, drops: 0, fullAimDrops: 0, bankShots: 0, laneWon: 0 }));
+    }
     return s;
   }
 
@@ -199,17 +241,24 @@ export class Referee {
     if (!game || typeof game !== "object" || !Array.isArray(game.order)) return [];
     this.order = game.order.filter((x) => typeof x === "string").slice(0, 16);
     if (game.phase === "playing" && typeof game.gameId === "string" && game.gameId && game.gameId !== this.game?.id) {
-      this.game = {
-        id: game.gameId, startedAt: now, coinsEach: Number(game.coinsEach) || 0, drops: 0, hostDrops: 0, out: 0, towers: 0, lastTowerAt: now,
-        tiers: new Set(), towerWon: new Set(), score: 0, hadTilt: false, wonTimes: [], hostLastShake: -Infinity, lastShake: null, shakeUnits: [], ended: false,
-      };
-      for (const s of this.seats.values()) Object.assign(s, { drops: 0, fullAimDrops: 0, bankShots: 0, laneWon: 0 });
+      // A game left running counts its time toward the host's drop allowance, like one that ended.
+      if (this.game && !this.game.ended) this.playedMs += Math.max(0, now - this.game.startedAt);
+      this.game = { id: game.gameId, startedAt: now, drops: 0, score: 0, hadTilt: false, ended: false };
+      if (!this.shelf || now - this.shelf.startedAt >= MIN_GAME_MS) {
+        // Players start with one of the listed amounts; anything else from the host is read as the most.
+        const each = Number(game.coinsEach);
+        const coinsEach = (COIN_OPTIONS as readonly number[]).includes(each) ? each : Math.max(...COIN_OPTIONS);
+        this.shelf = { startedAt: now, coinsEach, drops: 0, out: 0, towers: 0, tiers: new Set(), towerWon: new Set() };
+        this.lastTowerAt = now;
+        for (const s of this.seats.values()) Object.assign(s, { drops: 0, fullAimDrops: 0, bankShots: 0, laneWon: 0 });
+      }
       return [];
     }
     if (game.phase === "over" && this.game && game.gameId === this.game.id && !this.game.ended) return this.endGame(now, this.accounts);
     return [];
   }
 
+  /** Players who dropped a coin in this game's shelf. */
   private participants(): string[] {
     return this.order.filter((id) => (this.seats.get(id)?.drops ?? 0) > 0);
   }
@@ -217,7 +266,8 @@ export class Referee {
   /** The events in one of the host's frames. */
   frame(events: SimEvent[], now: number): Credit[] {
     const g = this.game;
-    if (!g || g.ended || !Array.isArray(events)) return [];
+    const sh = this.shelf;
+    if (!g || !sh || g.ended || !Array.isArray(events)) return [];
     const credits: Credit[] = [];
     const give = (playerId: string, earned: string[], delta: Delta = {}) => credits.push({ playerId, earned, delta });
     for (const e of events.slice(0, 200)) {
@@ -230,9 +280,10 @@ export class Referee {
           let phone = false;
           let fullAim = false;
           if (by === this.hostId) {
-            // The host's own drops never pass the relay: cap them by game time.
-            if (g.hostDrops >= Math.floor((now - g.startedAt) / DROP_COOLDOWN_MS) + 2) break;
-            g.hostDrops++;
+            // The host's own drops never pass the relay: cap them by the time games have run in this room.
+            const played = this.playedMs + Math.max(0, now - g.startedAt);
+            if (this.hostDrops >= Math.floor(played / DROP_COOLDOWN_MS) + 2) break;
+            this.hostDrops++;
             fullAim = typeof e.aim === "number" && Math.abs(e.aim) >= FULL_AIM;
           } else {
             s.requests = s.requests.filter((r) => now - r.at <= REQUEST_TTL_MS);
@@ -242,8 +293,9 @@ export class Referee {
             fullAim = req.fullAim;
           }
           // Nobody drops more coins than they started with plus won back.
-          if (g.coinsEach && s.drops >= g.coinsEach + s.laneWon) break;
+          if (s.drops >= sh.coinsEach + s.laneWon) break;
           s.drops++;
+          sh.drops++;
           g.drops++;
           if (fullAim) s.fullAimDrops++;
           const add: Record<string, number> = { drops: 1 };
@@ -252,19 +304,19 @@ export class Referee {
           break;
         }
         case "won": {
-          const holds = START_PILE + STACK_COINS * (START_STACKS + STACKS_PER_TOWER * g.towers) + g.drops;
-          if (g.out >= holds) break;
-          g.wonTimes = g.wonTimes.filter((t) => now - t < 2_000);
-          if (g.wonTimes.filter((t) => now - t < 1_000).length >= WON_PER_SECOND_CAP) break;
-          g.out++;
-          g.wonTimes.push(now);
+          const holds = START_PILE + STACK_COINS * (START_STACKS + STACKS_PER_TOWER * sh.towers) + sh.drops;
+          if (sh.out >= holds) break;
+          this.wonTimes = this.wonTimes.filter((t) => now - t < 2_000);
+          if (this.wonTimes.filter((t) => now - t < 1_000).length >= WON_PER_SECOND_CAP) break;
+          sh.out++;
+          this.wonTimes.push(now);
           const lane = typeof e.lane === "number" ? e.lane : -1;
           const to = this.order[lane];
           if (to && this.seat(to).drops > 0) {
             const s = this.seat(to);
             s.laneWon++;
             const earned = ["into_the_tray"];
-            if (g.coinsEach && s.laneWon === g.coinsEach) earned.push("breaking_even");
+            if (s.laneWon === sh.coinsEach) earned.push("breaking_even");
             give(to, earned, { add: { coinsWon: 1 } });
           }
           const by = typeof e.by === "string" ? e.by : "";
@@ -275,35 +327,35 @@ export class Referee {
               give(by, ["bank_shot"]);
             }
           }
-          const inOne = g.wonTimes.filter((t) => now - t < 1_000).length;
+          const inOne = this.wonTimes.filter((t) => now - t < 1_000).length;
           const shelf: string[] = [];
           if (inOne >= 10) shelf.push("jackpot");
-          if (g.wonTimes.length >= 25) shelf.push("avalanche");
+          if (this.wonTimes.length >= 25) shelf.push("avalanche");
           if (shelf.length) for (const id of this.participants()) give(id, shelf);
           break;
         }
         case "lost":
-          g.out++;
+          sh.out++;
           break;
         case "tower":
-          if (now - g.lastTowerAt < MIN_TOWER_GAP_MS) break;
-          g.towers++;
-          g.lastTowerAt = now;
-          g.tiers.clear();
-          g.towerWon.clear();
+          if (now - this.lastTowerAt < MIN_TOWER_GAP_MS) break;
+          sh.towers++;
+          this.lastTowerAt = now;
+          sh.tiers.clear();
+          sh.towerWon.clear();
           break;
         case "prize":
         case "prize-lost": {
           const tier = typeof e.tier === "number" ? e.tier : -1;
-          if (!Number.isInteger(tier) || tier < 0 || tier >= PRIZE_POINTS.length || g.tiers.has(tier)) break;
-          g.tiers.add(tier);
+          if (!Number.isInteger(tier) || tier < 0 || tier >= PRIZE_POINTS.length || sh.tiers.has(tier)) break;
+          sh.tiers.add(tier);
           if (e.k === "prize-lost") break;
-          g.towerWon.add(tier);
+          sh.towerWon.add(tier);
           const before = g.score;
           g.score += PRIZE_POINTS[tier];
           const earned = ["prize_winner"];
           if (tier === PRIZE_POINTS.length - 1) earned.push("top_prize");
-          if (g.towerWon.size === PRIZE_POINTS.length) earned.push("tower_down");
+          if (sh.towerWon.size === PRIZE_POINTS.length) earned.push("tower_down");
           if (before < 100 && g.score >= 100) earned.push("high_score");
           if (before < 250 && g.score >= 250) earned.push("big_night");
           for (const id of this.participants()) give(id, earned, { add: { prizes: 1 } });
@@ -313,8 +365,8 @@ export class Referee {
           const by = Array.isArray(e.by) ? e.by.filter((x): x is string => typeof x === "string" && this.order.includes(x)) : [];
           const counted = [...new Set(by)].filter((id) => {
             if (id === this.hostId) {
-              if (now - g.hostLastShake < HOST_SHAKE_GAP_MS) return false;
-              g.hostLastShake = now;
+              if (now - this.hostLastShake < HOST_SHAKE_GAP_MS) return false;
+              this.hostLastShake = now;
               return true;
             }
             const s = this.seat(id);
@@ -323,8 +375,8 @@ export class Referee {
             return ok;
           });
           if (!counted.length) break;
-          g.lastShake = { at: now, by: counted };
-          g.shakeUnits = [...g.shakeUnits.filter((t) => now - t < 10_000), ...counted.map(() => now)];
+          this.lastShake = { at: now, by: counted };
+          this.shakeUnits = [...this.shakeUnits.filter((t) => now - t < 10_000), ...counted.map(() => now)];
           const earned: string[] = [];
           if (counted.length >= 2) earned.push("in_sync");
           if (counted.length >= 4) earned.push("full_shake");
@@ -334,8 +386,8 @@ export class Referee {
         case "tilt": {
           g.hadTilt = true;
           // A full meter takes about four shakers' worth; three counted shakes is the least that could do it.
-          const units = g.shakeUnits.filter((t) => now - t < 10_000).length;
-          if (g.lastShake && now - g.lastShake.at < 3_000 && units >= 3) for (const id of g.lastShake.by) give(id, ["tilt"]);
+          const units = this.shakeUnits.filter((t) => now - t < 10_000).length;
+          if (this.lastShake && now - this.lastShake.at < 3_000 && units >= 3) for (const id of this.lastShake.by) give(id, ["tilt"]);
           break;
         }
         default:
@@ -353,6 +405,7 @@ export class Referee {
     const g = this.game;
     if (!g || g.ended) return [];
     g.ended = true;
+    this.playedMs += Math.max(0, now - g.startedAt);
     const players = this.participants();
     if (g.drops < MIN_GAME_DROPS || now - g.startedAt < MIN_GAME_MS) return [];
     const signedIn = players.map((id) => userIds.get(id)).filter((u): u is string => !!u);

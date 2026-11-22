@@ -37,6 +37,7 @@ Discord runs Activities in a cross-origin iframe that isn't delegated the `accel
   - `shake`
 
   The last two count for its player. It can't join as a player or become host. Both transports mark remote connections, so the sender can't claim to be one.
+- On the relay, a remote joins only with its key. The table registers the SHA-256 of the remote key with the room over its own socket (in its first message, and again on every new link or unpair). The remote sends the key in its first message, never in the socket's address. The room takes it only when a player there registered that key, and it then plays for that player only. A remote whose key isn't registered is closed (code 4003) without being sent anything; it keeps trying, slowly, so it picks the link up if it comes back. A remote outlasts a short drop of its player's connection (10 s). See `worker/src/remotes.ts`.
 - Anyone with the link can play your coins, so the sheet warns not to show the code on a stream.
 
 ## Tests

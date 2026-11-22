@@ -65,6 +65,8 @@ function boot() {
   let players: Player[] = [];
   let game: GameState = createGame();
   let gotState = false;
+  /** The relay turned us away: no player has this link's key registered. */
+  let unlinked = false;
   let locked = false;
   let tilt = 0;
   let hintTimer: ReturnType<typeof setTimeout> | undefined;
@@ -140,7 +142,7 @@ function boot() {
   function render() {
     const mine = me();
     renderMe(mine);
-    if (gotState && !mine) {
+    if (unlinked || (gotState && !mine)) {
       message("This link isn't active", "Tap 📱 at the machine and scan the new code. This page will pick it up if the link comes back.");
     } else {
       $("r-message").hidden = true;
@@ -182,7 +184,11 @@ function boot() {
   function status(s: TransportStatus) {
     const conn = $("r-conn");
     conn.classList.toggle("ok", s.kind === "connected");
-    conn.textContent = s.kind === "connected" ? "Connected" : s.kind === "failed" ? "Offline" : s.kind === "reconnecting" ? "Reconnecting…" : "Connecting…";
+    conn.textContent = s.kind === "connected" ? "Connected" : s.kind === "failed" ? "Offline" : s.kind === "reconnecting" ? "Reconnecting…" : s.kind === "unlinked" ? "Not linked" : "Connecting…";
+    if (s.kind === "unlinked" || s.kind === "connected") {
+      unlinked = s.kind === "unlinked";
+      render();
+    }
     if (s.kind === "failed") message("Couldn't reach the machine", `${s.reason} Make sure the game is still open.`, true);
   }
 

@@ -4,12 +4,19 @@ import { Emitter, type Transport, type TransportEvents } from "./transport";
 /** Also how the relay spots a dead host: see STALE_MS in the Worker. */
 const PING_MS = 5_000;
 const MAX_BACKOFF_MS = 8_000;
+/** The relay closes a remote whose key no player has registered with this code (worker/src/remotes.ts). */
+const CLOSE_NOT_LINKED = 4003;
+/** After this many tries in a row that never opened, ask for a new ticket (at most once per TICKET_REFRESH_MIN_MS). */
+const UNOPENED_BEFORE_REFRESH = 2;
+const TICKET_REFRESH_MIN_MS = 30_000;
 
 export type RelayOptions = {
   /** Remotes are never host and aren't players; see PHONE-REMOTE.md. */
   role?: Role;
   /** Required for players in Discord rooms (worker/src/roomTicket.ts). */
   ticket?: string;
+  /** Tickets expire. When the relay stops letting us in, this gets a new one (undefined if it can't). */
+  refreshTicket?: () => Promise<string | undefined>;
   /** A House Tandem session (web sign-in); the relay checks it and tells the host which account this player is. */
   ht?: string;
 };
@@ -27,6 +34,10 @@ function accountMap(raw: unknown): Record<string, string> {
 /**
  * WebSocket transport through a Cloudflare Durable Object (worker/src/index.ts).
  * The relay orders player connections by arrival; the earliest one is host.
+ *
+ * The socket's address carries only what the relay needs to route it. The
+ * House Tandem session and a remote's key go in the first message instead
+ * (ServerMsg "join"), so they stay out of addresses and request logs.
  */
 export class RelayTransport implements Transport {
   readonly kind = "relay";
@@ -40,6 +51,14 @@ export class RelayTransport implements Transport {
   private connectedOnce = false;
   /** True until the first peers message on the current socket. */
   private fresh = true;
+  private ticket: string | undefined;
+  /** Tries in a row that closed without opening. */
+  private unopened = 0;
+  private lastTicketRefresh = -Infinity;
+  /** Times in a row the relay turned this remote away. */
+  private refusals = 0;
+  /** Player only: the hash of our current remote link's key, kept so a reconnect registers it again. */
+  private remoteHash: string | null = null;
 
   constructor(
     private readonly roomId: string,
@@ -47,7 +66,9 @@ export class RelayTransport implements Transport {
     private readonly key: string,
     private readonly apiBase: string,
     private readonly options: RelayOptions = {},
-  ) {}
+  ) {
+    this.ticket = options.ticket;
+  }
 
   on<K extends keyof TransportEvents>(event: K, cb: TransportEvents[K]) {
     this.events.on(event, cb);
@@ -62,11 +83,16 @@ export class RelayTransport implements Transport {
     const base = new URL(`${this.apiBase}/relay/${encodeURIComponent(this.roomId)}`, location.href);
     base.protocol = base.protocol === "https:" ? "wss:" : "ws:";
     base.searchParams.set("id", this.selfId);
-    base.searchParams.set("key", this.key);
     if (this.options.role === "remote") base.searchParams.set("role", "remote");
-    if (this.options.ticket) base.searchParams.set("ticket", this.options.ticket);
-    if (this.options.ht) base.searchParams.set("ht", this.options.ht);
+    else base.searchParams.set("key", this.key);
+    if (this.ticket) base.searchParams.set("ticket", this.ticket);
     return base.toString();
+  }
+
+  /** The first message on every socket. */
+  private join(): ServerMsg {
+    if (this.options.role === "remote") return { t: "join", key: this.key };
+    return { t: "join", ...(this.options.ht ? { ht: this.options.ht } : {}), ...(this.remoteHash ? { remote: this.remoteHash } : {}) };
   }
 
   private open(resolve?: () => void, reject?: (e: Error) => void) {
@@ -77,7 +103,9 @@ export class RelayTransport implements Transport {
     ws.onopen = () => {
       opened = true;
       this.attempt = 0;
+      this.unopened = 0;
       this.fresh = true;
+      ws.send(JSON.stringify({ to: "server", msg: this.join() }));
       clearInterval(this.pingTimer);
       this.pingTimer = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send("ping"), PING_MS);
     };
@@ -93,6 +121,7 @@ export class RelayTransport implements Transport {
       const d = data as { type?: string; ids?: unknown; remotes?: unknown; env?: unknown; accounts?: unknown };
       if (d.type === "peers" && Array.isArray(d.ids)) {
         const strings = (xs: unknown) => (Array.isArray(xs) ? xs.filter((x): x is string => typeof x === "string") : []);
+        this.refusals = 0;
         this.onPeers(strings(d.ids), strings(d.remotes), accountMap(d.accounts));
         if (!this.connectedOnce) {
           this.connectedOnce = true;
@@ -104,18 +133,40 @@ export class RelayTransport implements Transport {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       clearInterval(this.pingTimer);
       if (this.closed) return;
+      if (!opened) this.unopened++;
       if (!opened && !this.connectedOnce && this.attempt >= 2) {
         reject?.(new Error("Could not reach the relay server"));
         this.events.emit("status", { kind: "failed", reason: "Could not reach the relay server." });
         return;
       }
-      this.events.emit("status", { kind: "reconnecting" });
-      const delay = Math.min(MAX_BACKOFF_MS, 500 * 2 ** this.attempt++);
-      setTimeout(() => !this.closed && this.open(resolve, reject), delay);
+      let delay: number;
+      if (ev?.code === CLOSE_NOT_LINKED) {
+        // No player has this remote's key registered (any more). Keep asking, slowly: the link may come back.
+        this.events.emit("status", { kind: "unlinked" });
+        delay = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** this.refusals++);
+      } else {
+        this.events.emit("status", { kind: "reconnecting" });
+        delay = Math.min(MAX_BACKOFF_MS, 500 * 2 ** this.attempt++);
+      }
+      setTimeout(() => void this.reopen(resolve, reject), delay);
     };
+  }
+
+  /** Reconnect, first getting a new ticket when the relay keeps refusing the one we have. */
+  private async reopen(resolve?: () => void, reject?: (e: Error) => void) {
+    const refresh = this.options.refreshTicket;
+    if (refresh && !this.closed && this.unopened >= UNOPENED_BEFORE_REFRESH && Date.now() - this.lastTicketRefresh >= TICKET_REFRESH_MIN_MS) {
+      this.lastTicketRefresh = Date.now();
+      try {
+        this.ticket = (await refresh()) ?? this.ticket;
+      } catch {
+        // keep the old one; the next round tries again
+      }
+    }
+    if (!this.closed) this.open(resolve, reject);
   }
 
   /** `ids` are players in connection order (the first is host); `remotes` are phone remotes. */
@@ -142,6 +193,15 @@ export class RelayTransport implements Transport {
     if (this.ws?.readyState !== WebSocket.OPEN) return false;
     this.ws.send(JSON.stringify({ to: "server", msg }));
     return true;
+  }
+
+  /**
+   * Tell the relay which remote may play for us: the hash of the key in our
+   * remote link, or null for none. Only a remote presenting that key gets in.
+   */
+  registerRemote(keyHash: string | null) {
+    this.remoteHash = keyHash;
+    this.toServer({ t: "remote-key", ...(keyHash ? { hash: keyHash } : {}) });
   }
 
   close() {

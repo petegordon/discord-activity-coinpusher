@@ -8,6 +8,19 @@ export type Attachment = {
   loginId?: number;
   /** When this socket last reported time in game (worker/src/playtime.ts). */
   lastPlaytime?: number;
+  /** Player: the room has read its first message (see ServerMsg "join" in src/net/protocol.ts). */
+  joined?: boolean;
+  /** Player: not a Discord room, so its first message may carry a House Tandem session. */
+  web?: boolean;
+  /** Player: the SHA-256 of the key in its current remote link (worker/src/remotes.ts). */
+  remoteHash?: string;
+  /** Remote: still to send its key; not part of the room yet. */
+  pending?: boolean;
+  /** Remote: the hash of the key it presented, and the player who registered it. */
+  keyHash?: string;
+  owner?: string;
+  /** Remote: since when its player has had no connection. */
+  orphanedAt?: number;
 };
 
 /**

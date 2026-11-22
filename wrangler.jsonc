@@ -20,6 +20,13 @@
     "bindings": [{ "name": "RELAY", "class_name": "RelayRoom" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayRoom"] }],
+  // Rate limits per address, per minute (worker/src/limits.ts): Discord token exchanges, and new room connections.
+  "unsafe": {
+    "bindings": [
+      { "name": "TOKEN_RATE", "type": "ratelimit", "namespace_id": "4111", "simple": { "limit": 20, "period": 60 } },
+      { "name": "ROOM_RATE", "type": "ratelimit", "namespace_id": "4112", "simple": { "limit": 60, "period": 60 } }
+    ]
+  },
   // Also serve on <name>.<subdomain>.workers.dev, which works before the custom domain is set up.
   "workers_dev": true,
   // coins is the main address; coinpusher (the first one) serves the same game.

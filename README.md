@@ -88,7 +88,10 @@ The Worker serves the static build, `/api/*` and the relay on the custom domain 
 ```bash
 npm run deploy
 npx wrangler secret put DISCORD_CLIENT_SECRET   # once the Discord app exists
+npx wrangler secret put DISCORD_BOT_TOKEN       # checks a player is in the Activity instance before a room ticket is issued
 ```
+
+With `DISCORD_BOT_TOKEN` set (the bot token of the same Discord application), `/api/token` asks Discord whether the player is in the Activity instance before it issues a room ticket for it. Without the secret that check is skipped, and the Worker says so once in its log.
 
 ## Discord Activity setup
 

@@ -163,6 +163,145 @@ describe("referee: game end", () => {
   });
 });
 
+describe("referee: the caps hold across game ids", () => {
+  /** The host announces a new game id, as often as it likes. */
+  const restart = (r: Referee, order: string[], n: number, t: number, coinsEach = 20) => r.state(playing(order, `g${n}`, coinsEach), t);
+
+  it("a new game id does not give the host more drops: they are capped by the time games have run", () => {
+    const r = new Referee();
+    r.hostId = "h";
+    let counted = 0;
+    // Ten game ids inside one second, the host claiming five drops in each.
+    for (let n = 0; n < 10; n++) {
+      restart(r, ["h", "a"], n, n * 100);
+      for (let i = 0; i < 5; i++) counted += drop(r, "h", n * 100 + 50).length;
+    }
+    expect(counted).toBeLessThanOrEqual(Math.floor(1000 / 350) + 2);
+  });
+
+  it("time between games does not add to the host's allowance; time in games does", () => {
+    const r = new Referee();
+    r.hostId = "h";
+    restart(r, ["h", "a"], 1, 0);
+    expect(drop(r, "h", 10)).toHaveLength(1);
+    expect(drop(r, "h", 20)).toHaveLength(1);
+    expect(drop(r, "h", 30)).toHaveLength(0);
+    r.state({ ...playing(["h", "a"], "g1", 20), phase: "over" }, 700); // 700 ms played: two more
+    // An hour in the lobby, then a new game.
+    restart(r, ["h", "a"], 2, 3_600_000);
+    let n = 0;
+    for (let i = 0; i < 10; i++) n += drop(r, "h", 3_600_000 + 10).length;
+    expect(n).toBe(2);
+  });
+
+  it("a new game id does not refill a player's coins while the last shelf is still new", () => {
+    const r = new Referee();
+    r.hostId = "h";
+    restart(r, ["h", "a"], 0, 0);
+    let drops = 0;
+    // A new id every 2 seconds for 14 seconds; a keeps asking for five more coins each time.
+    for (let n = 0; n < 7; n++) {
+      if (n) restart(r, ["h", "a"], n, n * 2000);
+      for (let i = 0; i < 5; i++) drops += drop(r, "a", n * 2000 + 100 + i * 360).length;
+    }
+    expect(drops).toBe(20); // what a started with; 35 were asked for
+    restart(r, ["h", "a"], 7, 14_500);
+    expect(drop(r, "a", 14_900)).toHaveLength(0);
+    // A game started once the shelf has had its time is a new shelf, with its coins.
+    restart(r, ["h", "a"], 8, MIN_GAME_MS);
+    expect(drop(r, "a", MIN_GAME_MS + 100)).toHaveLength(1);
+  });
+
+  it("coins won stay within one shelf and one second's worth, however many game ids pass", () => {
+    const r = new Referee();
+    r.hostId = "h";
+    restart(r, ["h", "a"], 0, 0);
+    drop(r, "a", 100);
+    let credited = 0;
+    // 50 game ids in 5 seconds, each paying 40 coins into a's lane at once.
+    for (let n = 1; n <= 50; n++) {
+      const t = n * 100;
+      restart(r, ["h", "a"], n, t);
+      credited += r.frame(Array.from({ length: 40 }, () => ({ k: "won" as const, x: 0, lane: 1 })), t).filter((c) => c.earned.includes("into_the_tray")).length;
+    }
+    expect(credited).toBeLessThanOrEqual(WON_PER_SECOND_CAP * 6);
+    // And never more than that one shelf held: the start pile, its stacks, and the one counted drop.
+    for (let i = 0; i < 400; i++) credited += r.frame([{ k: "won", x: 0, lane: 1 }], 6_000 + i * 40).filter((c) => c.earned.includes("into_the_tray")).length;
+    expect(credited).toBe(190 + 4 * 5 + 1);
+  });
+
+  it("a new game id does not bring a new tower: each prize tier still counts once, and towers keep their pace", () => {
+    const r = new Referee();
+    r.hostId = "h";
+    restart(r, ["h", "a"], 0, 0);
+    drop(r, "a", 100);
+    const tiers = [3, 2, 1, 0].map((tier) => ({ k: "prize" as const, x: 0, tier, points: 0 }));
+    let prizes = r.frame(tiers, 200).filter((c) => c.playerId === "a").length;
+    expect(prizes).toBe(4);
+    for (let n = 1; n <= 20; n++) {
+      restart(r, ["h", "a"], n, 200 + n * 100);
+      prizes += r.frame([{ k: "tower" }, ...tiers], 250 + n * 100).filter((c) => c.playerId === "a").length;
+    }
+    expect(prizes).toBe(4);
+    // A tower at the cabinet's pace counts as before.
+    expect(r.frame([{ k: "tower" }, ...tiers], 6_000).filter((c) => c.playerId === "a")).toHaveLength(4);
+  });
+
+  it("a shake still needs each player's own request, and the host's own are spaced, across game ids", () => {
+    const r = new Referee();
+    r.hostId = "h";
+    restart(r, ["h", "a", "b"], 0, 0);
+    for (const id of ["h", "a", "b"]) drop(r, id, 100);
+    r.request("a", { t: "shake" }, false, 1000);
+    r.request("b", { t: "shake" }, false, 1000);
+    expect(ids(r.frame([{ k: "shake", by: ["h", "a", "b"], strength: 3 }], 1050), "a")).toEqual(["in_sync"]);
+    // New ids, the same proof offered again and again.
+    let again = 0;
+    for (let n = 1; n <= 5; n++) {
+      restart(r, ["h", "a", "b"], n, 1050 + n * 50);
+      again += r.frame([{ k: "shake", by: ["h", "a", "b"], strength: 3 }], 1060 + n * 50).length;
+    }
+    expect(again).toBe(0);
+  });
+
+  it("what belongs to one game starts again with each: score, tilt, and whether it counts as a game", () => {
+    const r = new Referee();
+    r.hostId = "h";
+    r.accounts = new Map([["a", "11"], ["b", "22"]]);
+    const order = ["h", "a", "b"];
+    restart(r, order, 1, 0);
+    for (let i = 0; i < 3; i++) drop(r, "a", 1000 + i * 400);
+    for (let i = 0; i < 3; i++) drop(r, "b", 1000 + i * 400);
+    r.frame([{ k: "tilt" }], 3000);
+    const first = r.state({ ...playing(order, "g1", 20), phase: "over" }, MIN_GAME_MS + 1);
+    expect(ids(first, "a")).not.toContain("steady_hands");
+    expect(first.find((c) => c.playerId === "a")!.delta.add).toEqual({ games: 1 });
+
+    // The next game, started in the ordinary way: a new shelf, full coins, a clean slate for Steady Hands.
+    const t0 = MIN_GAME_MS + 5_000;
+    restart(r, order, 2, t0);
+    let n = 0;
+    for (let i = 0; i < 20; i++) n += drop(r, "a", t0 + 1000 + i * 400).length;
+    expect(n).toBe(20);
+    drop(r, "b", t0 + 1000);
+    const second = r.state({ ...playing(order, "g2", 20), phase: "over" }, t0 + MIN_GAME_MS + 1);
+    expect(ids(second, "a")).toContain("steady_hands");
+
+    // A game id that comes and goes at once is not a game.
+    restart(r, order, 3, t0 + MIN_GAME_MS + 100);
+    expect(r.state({ ...playing(order, "g3", 20), phase: "over" }, t0 + MIN_GAME_MS + 200)).toEqual([]);
+  });
+
+  it("the coins each player starts with are one of the listed amounts, whatever the host says", () => {
+    const r = new Referee();
+    r.hostId = "h";
+    r.state(playing(["h", "a"], "g", 1_000_000), 0);
+    let n = 0;
+    for (let i = 0; i < 80; i++) n += drop(r, "a", 1000 + i * 400).length;
+    expect(n).toBe(50);
+  });
+});
+
 describe("scorekeeper: saving to House Tandem", () => {
   function setup(profile: { earned: string[]; stats: Record<string, unknown> } = { earned: [], stats: {} }) {
     const recorded: { userId: string; game: string; delta: unknown; earned: string[]; loginId: number | null | undefined }[] = [];

@@ -44,12 +44,21 @@ export type Msg =
 export type Target = "host" | "all";
 
 /**
- * Client → the relay itself (`{ to: "server", msg }`), never relayed to anyone.
+ * Client → the relay room itself (`{ to: "server", msg }`), never relayed to anyone.
+ * join: the first message on every relay socket. A remote sends the key from its
+ *   link (so it is never in the socket's address); a player sends its House Tandem
+ *   session, if it has one, and the hash of its current remote key, if any.
+ * remote-key: a player made a new remote link (`hash`: SHA-256 of its key, hex)
+ *   or unpaired (no hash). Only a remote presenting that key may join and play
+ *   for them (worker/src/remotes.ts).
  * playtime: `s` more seconds of active play since this socket last reported
- * (time in game, housetandem-web #37). The relay credits the socket's VERIFIED
- * House Tandem account; guests and phone remotes are ignored (worker/src/playtime.ts).
+ *   (time in game, housetandem-web #37). The relay credits the socket's VERIFIED
+ *   House Tandem account; guests and phone remotes are ignored (worker/src/playtime.ts).
  */
-export type ServerMsg = { t: "playtime"; s: number };
+export type ServerMsg =
+  | { t: "join"; key?: string; ht?: string; remote?: string }
+  | { t: "remote-key"; hash?: string }
+  | { t: "playtime"; s: number };
 
 /**
  * `remote` is set by the relay or the PeerJS host when the sender connected
